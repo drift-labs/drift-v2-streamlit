@@ -1,5 +1,5 @@
 # drift-v2-streamlit
-Solana blockchain inspection tool for protocol-v2 (for any environment: localhost/devnet/mainnet-beta). 
+Solana blockchain inspection tool for protocol-v2 (for any environment: localhost/devnet/mainnet-beta).
 
 first and formost, simulation viewer
 - Uses [streamlit](https://streamlit.io/) to show UI for [drift-sim](https://github.com/drift-labs/drift-sim) results
@@ -14,6 +14,12 @@ pip install -r requirements.txt
 ```
 
 ### quick start
+
+Set environment variables:
+| Value                | Description             |
+|----------------------|-------------------------|
+| `ANCHOR_PROVIDER_URL`| A Solana RPC endpoint.  |
+
 
 ```
 streamlit run app.py [ARGUMENTS]
