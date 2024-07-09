@@ -38,3 +38,4 @@ The (multiple) authors of this tool do not assume any responsibility or liabilit
 Use of this tool is entirely at your own risk, and you should exercise caution, review the source code, and seek professional advice before making any decisions based on the information provided by the tool.
 
 Additionally, any contributions to this tool should be carefully reviewed and tested before they are merged into the codebase.
+
