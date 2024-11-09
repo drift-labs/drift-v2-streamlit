@@ -26,6 +26,7 @@ from driftpy.drift_client import DriftClient, AccountSubscriptionConfig
 from tabs.logs import log_page
 from tabs.simulations import sim_page
 from tabs.pid import show_pid_positions
+from tabs.overview_markets import show_overview_markets
 from tabs.fees import fee_page
 from tabs.if_stakers import insurance_fund_page
 from tabs.userstats import show_user_stats
@@ -81,9 +82,11 @@ def main():
     query_p = st.experimental_get_query_params()
     query_tab = query_p.get('tab', ['Welcome'])[0]
 
-    tab_options = ('Welcome', 'Overview', 
-    'Simulations', 'Logs',
-    
+    tab_options = (
+     'Welcome',
+     'Overview-Markets', 'Overview-Users',
+     'Simulations', 'Logs',
+
      'Fee-Schedule', 'Insurance-Fund', 'Perp-LPs',
      'User-Activity',
      'User-Performance',
@@ -130,7 +133,7 @@ def main():
     clearing_house: DriftClient = DriftClient(provider.connection, provider.wallet, env.split('-')[0], account_subscription=AccountSubscriptionConfig("cached"))
     # st.write(clearing_house.__dict__.keys())
     clearing_house.time = current_time
-    
+
     st.title(f'Drift v2: {tab}')
 
     if tab.lower() == 'welcome':
@@ -150,23 +153,27 @@ def main():
         ```
         git clone https://github.com/0xbigz/drift-v2-streamlit.git
         cd drift-v2-streamlit/
-        
+
         python3.10 -m venv venv
         source venv/bin/activate
         pip install -r requirements.txt
 
-        streamlit run app.py 
+        streamlit run app.py
         ```
-                    
+
         (this app uses streamlit==1.27, see `requirements.txt`)
         """)
+
+    elif tab.lower() == 'overview-markets':
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(show_overview_markets(clearing_house))
 
     elif tab.lower() == 'overview':
         loop = asyncio.new_event_loop()
         loop.run_until_complete(show_pid_positions(clearing_house))
 
 
-    elif tab.lower() == 'config':  
+    elif tab.lower() == 'config':
         with st.expander(f"pid={clearing_house.program_id} config"):
             st.json(config.__dict__)
 
@@ -220,10 +227,10 @@ def main():
     elif tab.lower() == 'api':
         loop = asyncio.new_event_loop()
         loop.run_until_complete(show_api(clearing_house))
-    
+
     elif tab.lower() == 'dlob':
         orders_page(clearing_house)
-    
+
     elif tab.lower() == 'user-volume':
         loop = asyncio.new_event_loop()
         loop.run_until_complete(show_user_volume(clearing_house))
@@ -265,7 +272,7 @@ def main():
     elif tab.lower() == 'drift-gpt':
         loop = asyncio.new_event_loop()
         loop.run_until_complete(gpt_page(clearing_house))
-        
+
     elif tab.lower() == 'superstake':
         loop = asyncio.new_event_loop()
         loop.run_until_complete(super_stake(clearing_house))
@@ -282,20 +289,20 @@ def main():
         loop.run_until_complete(vaults(clearing_house, env))
     elif tab.lower() == 'driftdraw':
         loop = asyncio.new_event_loop()
-        loop.run_until_complete(competitions(clearing_house, env))   
+        loop.run_until_complete(competitions(clearing_house, env))
     elif tab.lower() == 'openbookv2':
         loop = asyncio.new_event_loop()
-        loop.run_until_complete(tab_openbookv2(clearing_house, env))      
+        loop.run_until_complete(tab_openbookv2(clearing_house, env))
     elif tab.lower() == 'usermap':
         # loop = asyncio.new_event_loop()
-        usermap_page(clearing_house, env)  
+        usermap_page(clearing_house, env)
     elif tab.lower() == 'usersinmarket':
         loop = asyncio.new_event_loop()
-        loop.run_until_complete(users_in_market_page(clearing_house, env))  
+        loop.run_until_complete(users_in_market_page(clearing_house, env))
         # users_in_market_page
     elif tab.lower() == 'backtester':
         try:
-            backtester_page(clearing_house, env)         
+            backtester_page(clearing_house, env)
         except:
             pass
     hide_streamlit_style = """
@@ -304,7 +311,7 @@ def main():
             footer {visibility: hidden;}
             </style>
             """
-    st.markdown(hide_streamlit_style, unsafe_allow_html=True) 
+    st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 
 if __name__ == '__main__':
     try:

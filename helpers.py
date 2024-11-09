@@ -7,6 +7,7 @@ from driftpy.math.market import *
 
 from driftpy.types import *
 from driftpy.constants.numeric_constants import *
+from driftpy.decode.utils import decode_name
 
 from driftpy.setup.helpers import mock_oracle, _airdrop_user, set_price_feed, set_price_feed_detailed, adjust_oracle_pretrade, _mint_usdc_tx
 from driftpy.admin import Admin
@@ -160,16 +161,16 @@ async def all_user_stats(all_users, ch: DriftClient, oracle_distort=None, pure_c
     if all_users is not None:
         fuser: DriftUser = all_users[0].account
         chu = DriftUser(
-            ch, 
-            user_public_key=fuser.user_public_key, 
-            # sub_account_id=fuser.sub_account_id, 
+            ch,
+            user_public_key=fuser.user_public_key,
+            # sub_account_id=fuser.sub_account_id,
             # use_cache=True
         )
         if pure_cache is None and chu.drift_client.account_subscriber.cache is None:
             await chu.drift_client.account_subscriber.update_cache()
         else:
             chu.drift_client.account_subscriber.cache = pure_cache
-            
+
         cache1 = copy.deepcopy(chu.drift_client.account_subscriber.cache)
         if oracle_distort is not None:
             # new_spots = []
@@ -197,11 +198,11 @@ async def all_user_stats(all_users, ch: DriftClient, oracle_distort=None, pure_c
             key = str(x.public_key)
             account: DriftUser = x.account
 
-            chu = DriftUser(ch, user_public_key=account.user_public_key, 
+            chu = DriftUser(ch, user_public_key=account.user_public_key,
                             # sub_account_id=account.sub_account_id,
                             account_subscription=AccountSubscriptionConfig("cached"))
                             # use_cache=True
-                            
+
             chu.account_subscriber.user_and_slot = DataAndSlot(0, account)
             chu.drift_client.account_subscriber.cache = cache1
 
@@ -224,7 +225,7 @@ async def all_user_stats(all_users, ch: DriftClient, oracle_distort=None, pure_c
 
 
         return res, chu
-    
+
 
 
 
@@ -232,7 +233,7 @@ async def all_user_stats(all_users, ch: DriftClient, oracle_distort=None, pure_c
 def human_amm_df(df):
     bool_fields = [ 'last_oracle_valid']
     enum_fields = ['oracle_source']
-    pure_fields = ['last_update_slot', 'long_intensity_count', 'short_intensity_count', 
+    pure_fields = ['last_update_slot', 'long_intensity_count', 'short_intensity_count',
     'curve_update_intensity', 'amm_jit_intensity'
     ]
     reserve_fields = [
@@ -243,7 +244,7 @@ def human_amm_df(df):
         ]
 
     wgt_fields = ['initial_asset_weight', 'maintenance_asset_weight',
-    
+
     'initial_liability_weight', 'maintenance_liability_weight',
     'unrealized_pnl_initial_asset_weight', 'unrealized_pnl_maintenance_asset_weight']
 
@@ -275,11 +276,11 @@ def human_amm_df(df):
     'mark_std',
     'oracle_std',
     'last_oracle_price_twap', 'last_oracle_price_twap5min',
-    'last_oracle_price', 'last_oracle_conf', 
+    'last_oracle_price', 'last_oracle_conf',
 
     #spot market ones
         'last_index_bid_price', 'last_index_ask_price', 'last_index_price_twap', 'last_index_price_twap5min',
-    
+
     ]
     token_fields = ['deposit_token_twap', 'borrow_token_twap', 'max_token_deposits', 'withdraw_guard_threshold']
     balance_fields = ['scaled_balance', 'deposit_balance', 'borrow_balance']
@@ -312,7 +313,7 @@ def human_amm_df(df):
             df[col] = [datetime.datetime.fromtimestamp(x) for x in df[col].values]
         elif col in balance_fields:
             df[col] /= 1e9
-            
+
     return df
 
 def human_market_df(df):
@@ -320,7 +321,7 @@ def human_market_df(df):
     pure_fields = ['number_of_users', 'market_index', 'next_curve_record_id', 'next_fill_record_id', 'next_funding_rate_record_id']
     pct_fields = ['imf_factor', 'unrealized_pnl_imf_factor', 'liquidator_fee', 'if_liquidation_fee']
     wgt_fields = ['initial_asset_weight', 'maintenance_asset_weight',
-    
+
     'initial_liability_weight', 'maintenance_liability_weight',
     'unrealized_pnl_initial_asset_weight', 'unrealized_pnl_maintenance_asset_weight']
     margin_fields = ['margin_ratio_initial', 'margin_ratio_maintenance']
@@ -333,13 +334,13 @@ def human_market_df(df):
     'mark_std',
     'oracle_std',
     'last_oracle_price_twap', 'last_oracle_price_twap5min',
-    
+
     ]
     time_fields = ['last_trade_ts', 'expiry_ts', 'last_revenue_withdraw_ts']
     balance_fields = ['scaled_balance', 'deposit_balance', 'borrow_balance']
     quote_fields = [
-        'total_spot_fee', 
-        'unrealized_pnl_max_imbalance', 'quote_settled_insurance', 'quote_max_insurance', 
+        'total_spot_fee',
+        'unrealized_pnl_max_imbalance', 'quote_settled_insurance', 'quote_max_insurance',
     'max_revenue_withdraw_per_period', 'revenue_withdraw_since_last_settle', ]
     token_fields = ['borrow_token_twap', 'deposit_token_twap', 'withdraw_guard_threshold', 'max_token_deposits']
     interest_fields = ['cumulative_deposit_interest', 'cumulative_borrow_interest']
@@ -366,14 +367,16 @@ def human_market_df(df):
         elif col in interest_fields:
             df[col] /= 1e10
         elif col in token_fields:
-            df[col] /= 1e6 #todo   
+            df[col] /= 1e6 #todo
 
     return df
-    
+
 
 def serialize_perp_market_2(market: PerpMarketAccount):
 
     market_df = pd.json_normalize(market.__dict__).drop(['amm', 'insurance_claim', 'pnl_pool'],axis=1).pipe(human_market_df)
+    market_df['pubkey'] = str(market.pubkey)
+    market_df['name'] = decode_name(market.name)
     market_df.columns = ['market.'+col for col in market_df.columns]
 
     amm_df= pd.json_normalize(market.amm.__dict__).drop(['historical_oracle_data', 'fee_pool'],axis=1).pipe(human_amm_df)
@@ -400,6 +403,12 @@ def serialize_spot_market(spot_market: SpotMarketAccount):
         'insurance_fund', # todo
         'spot_fee_pool', 'revenue_pool'
         ], axis=1).pipe(human_amm_df)
+    spot_market_df['name'] = decode_name(spot_market.name)
+    spot_market_df['pubkey'] = str(spot_market.pubkey)
+    spot_market_df['oracle'] = str(spot_market.oracle)
+    spot_market_df['mint'] = str(spot_market.mint)
+    spot_market_df['vault'] = str(spot_market.vault)
+
     spot_market_df.columns = ['spot_market.'+col for col in spot_market_df.columns]
 
     if_df= pd.json_normalize(spot_market.insurance_fund.__dict__).pipe(human_amm_df)
