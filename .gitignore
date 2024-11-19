@@ -1,0 +1,9 @@
+*.bak
+node_modules/
+.DS_Store
+*.ipynb*
+scripts/
+__pycache__
+/venv
+transactions/
+run.sh
