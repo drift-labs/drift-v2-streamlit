@@ -136,13 +136,13 @@ def get_fee_tier_trades(trades):
     ]
 
     vip = trades[
-        (trades["fee_ratio"] == 0.000075)
-        | (trades["fee_ratio"] == 0.0000751)
+        (trades["fee_ratio"] < 0.0000751)
+        & (trades["fee_ratio"] > 0.000071)
         & (trades["actionExplanation"] != "liquidation")
     ]
 
     other_small = trades[
-        (trades["fee_ratio"] < 0.000075)
+        (trades["fee_ratio"] < 0.000071)
         & (trades["actionExplanation"] != "liquidation")
     ]
 
@@ -297,3 +297,34 @@ async def fee_income_page(ch: DriftClient):
                     "fee_ratio": st.column_config.NumberColumn(format="%.7f")
                 },
             )
+
+    with st.expander("Show takers per fee tier"):
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(
+            ["High Leverage", "Tier 1", "Tier 2-4", "VIP", "Other Small"]
+        )
+
+        with tab1:
+            st.write(
+                f"There are {len(fee_tiers['high_leverage']['taker'].unique())} unique high leverage takers"
+            )
+            st.dataframe(fee_tiers["high_leverage"]["taker"].value_counts())
+        with tab2:
+            st.write(
+                f"There are {len(fee_tiers['tier_1']['taker'].unique())} unique tier 1 takers"
+            )
+            st.dataframe(fee_tiers["tier_1"]["taker"].value_counts())
+        with tab3:
+            st.write(
+                f"There are {len(fee_tiers['tier_2_4']['taker'].unique())} unique tier 2-4 takers"
+            )
+            st.dataframe(fee_tiers["tier_2_4"]["taker"].value_counts())
+        with tab4:
+            st.write(
+                f"There are {len(fee_tiers['vip']['taker'].unique())} unique VIP takers"
+            )
+            st.dataframe(fee_tiers["vip"]["taker"].value_counts())
+        with tab5:
+            st.write(
+                f"There are {len(fee_tiers['other_small']['taker'].unique())} unique other small takers"
+            )
+            st.dataframe(fee_tiers["other_small"]["taker"].value_counts())
