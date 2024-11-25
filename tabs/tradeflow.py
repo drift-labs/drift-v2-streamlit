@@ -17,7 +17,6 @@ def dedupdf(all_markets, market_name, lookahead=60):
     df1["date"] = pd.to_datetime(df1["ts"])
     if "maker" not in df1.columns:
         df1["maker"] = np.nan
-    # st.write(df1.columns)
     df1 = df1.drop_duplicates(
         [
             "fillerReward",
@@ -108,7 +107,7 @@ def trade_flow_analysis():
     )
     if data_source == "s3":
         markets_data = load_s3_trades_data(market_selected, date, date)
-        markets_data[market]["ts"] = pd.to_datetime(markets_data[market]["ts"])
+        markets_data[market]["ts"] = pd.to_datetime(markets_data[market]["ts"] * 1e9)
     else:
         markets_data = {}
         for market in market_selected:
