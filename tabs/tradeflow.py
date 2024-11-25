@@ -89,7 +89,7 @@ def convert_df(df):
 def trade_flow_analysis():
     tzInfo = pytz.timezone("UTC")
 
-    modecol, col1, col2, col3 = st.columns([1, 3, 3, 3])
+    modecol, col1, col2 = st.columns([2, 3, 3])
     selection = modecol.radio("mode:", ["summary", "per-market"], index=1)
     data_source = modecol.radio("data source:", ["api", "s3"], index=0)
 
@@ -338,8 +338,8 @@ def trade_flow_analysis():
         )
         zol2.metric(
             f"{tt} Fees:",
-            f"${takerfee:.2f}",
-            f"${-makerfee:.2f} in liq/maker rebates, ${fillerfee:.2f} in filler rewards",
+            f"${takerfee:,.2f}",
+            f"${-makerfee:,.2f} in liq/maker rebates, ${fillerfee:,.2f} in filler rewards",
         )
 
         st.code(
