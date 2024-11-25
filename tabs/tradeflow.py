@@ -91,6 +91,7 @@ def trade_flow_analysis():
 
     modecol, col1, col2, col3 = st.columns([1, 3, 3, 3])
     selection = modecol.radio("mode:", ["summary", "per-market"], index=1)
+    data_source = modecol.radio("data source:", ["api", "s3"], index=0)
 
     markets = ALL_MARKET_NAMES
     market = None
@@ -105,11 +106,14 @@ def trade_flow_analysis():
         max_value=(datetime.datetime.now(tzInfo)),
         help="UTC timezone",
     )
-    # markets_data = load_s3_trades_data(market_selected, date, date)
-    markets_data = {}
-    for market in market_selected:
-        data = get_trades_for_range_pandas(market, date, date)
-        markets_data[market] = data
+    if data_source == "s3":
+        markets_data = load_s3_trades_data(market_selected, date, date)
+        markets_data[market]["ts"] = pd.to_datetime(markets_data[market]["ts"])
+    else:
+        markets_data = {}
+        for market in market_selected:
+            data = get_trades_for_range_pandas(market, date, date)
+            markets_data[market] = data
 
     # Display each market's data in separate expanders
     for market, data in markets_data.items():
