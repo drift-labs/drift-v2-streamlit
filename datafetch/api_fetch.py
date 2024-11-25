@@ -24,6 +24,7 @@ def get_trades_for_range_pandas(market_symbol, start_date, end_date, page=1):
         month = current_date.month
         day = current_date.day
         url = f"{URL_PREFIX}/market/{market_symbol}/trades/{year}/{month:02}/{day:02}"
+        print(f"==> {url}")
         try:
             response = requests.get(url, params={"page": page})
             response.raise_for_status()
