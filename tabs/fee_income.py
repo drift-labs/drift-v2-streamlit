@@ -104,9 +104,8 @@ def add_fee_ratio(df):
     Analyzes trade fee ratios accounting for both base and quote asset amounts
     """
     df["price"] = df["quoteAssetAmountFilled"] / df["baseAssetAmountFilled"]
-    df["total_fee"] = df["takerFee"]
     df["trade_value"] = abs(df["baseAssetAmountFilled"] * df["price"])
-    df["fee_ratio"] = abs(df["total_fee"] / df["trade_value"])
+    df["fee_ratio"] = abs(df["takerFee"] / df["trade_value"])
     return df
 
 
@@ -159,7 +158,7 @@ def summarize_trading_data(trades):
     summary = {
         "total_volume_base": abs(trades["baseAssetAmountFilled"]).sum(),
         "total_volume_quote": abs(trades["quoteAssetAmountFilled"]).sum(),
-        "total_fees": abs(trades["total_fee"]).sum(),
+        "total_fees": abs(trades["takerFee"]).sum(),
         "trade_count": len(trades),
         "avg_price": (
             trades["quoteAssetAmountFilled"] / trades["baseAssetAmountFilled"]
@@ -180,7 +179,7 @@ def summarize_trading_data(trades):
 def from_summary(summary):
     st.metric("Total Volume Base", f"{summary['total_volume_base']:,.2f}")
     st.metric("Total Volume Quote", f"{summary['total_volume_quote']:,.2f}")
-    st.metric("Total Fees", f"{summary['total_fees']:,.2f}")
+    st.metric("Taker Fees", f"{summary['total_fees']:,.2f}")
 
 
 def display_fee_tier_metrics(fee_tier_data, tier_name):
@@ -251,11 +250,6 @@ async def fee_income_page(ch: DriftClient):
         for col, (tier_name, tier_key) in zip(cols, tier_configs):
             with col:
                 display_fee_tier_metrics(fee_tiers[tier_key], tier_name)
-
-    summary = summarize_trading_data(trades)
-    st.write("---")
-    st.metric("All trades", len(trades))
-    from_summary(summary)
 
     with st.expander("Show Fee Tier Trades"):
         tab1, tab2, tab3, tab4, tab5 = st.tabs(
@@ -328,3 +322,19 @@ async def fee_income_page(ch: DriftClient):
                 f"There are {len(fee_tiers['other_small']['taker'].unique())} unique other small takers"
             )
             st.dataframe(fee_tiers["other_small"]["taker"].value_counts())
+
+    st.write("---")
+    cols = st.columns(3)
+    with cols[0]:
+        st.metric("All trades", len(trades))
+        from_summary(summarize_trading_data(trades))
+    with cols[1]:
+        trades_just_liquidations = trades[trades["actionExplanation"] == "liquidation"]
+        st.metric("Liquidations only", len(trades_just_liquidations))
+        from_summary(summarize_trading_data(trades_just_liquidations))
+    with cols[2]:
+        all_trades_minus_liquidations = trades[
+            trades["actionExplanation"] != "liquidation"
+        ]
+        st.metric("All trades minus liquidations", len(all_trades_minus_liquidations))
+        from_summary(summarize_trading_data(all_trades_minus_liquidations))
