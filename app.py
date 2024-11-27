@@ -37,7 +37,6 @@ from tabs.orders import orders_page
 from tabs.overview_markets import show_overview_markets
 from tabs.perpLP import perp_lp_page
 from tabs.pid import show_pid_positions
-from tabs.platyperps import show_platyperps
 from tabs.refs import ref_page
 from tabs.simulations import sim_page
 from tabs.superstake import super_stake

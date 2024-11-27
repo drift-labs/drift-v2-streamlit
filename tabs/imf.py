@@ -32,7 +32,7 @@ from glob import glob
 async def imf_page(clearing_house: DriftClient):   
     tabs = st.tabs(['overview', 'calculator']) 
     ch = clearing_house
-    if ch.account_subscriber.cache is None:
+    if ch.account_subscriber.cache is None or ch.account_subscriber.cache.get('state', None) is None:
         await ch.account_subscriber.update_cache()
     state = ch.get_state_account()
 
