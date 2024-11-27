@@ -88,7 +88,7 @@ def main():
         st.query_params.from_dict({"tab": st.session_state.query_key})
 
     query_p = st.query_params
-    query_tab = query_p.get("tab", ["Welcome"])[0]
+    query_tab = query_p.get("tab", ["Welcome"])
 
     tab_options = (
         "Welcome",
