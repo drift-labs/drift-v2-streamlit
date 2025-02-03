@@ -52,7 +52,7 @@ from tabs.userstatus import userstatus_page
 from tabs.uservolume import show_user_volume
 from tabs.vamm import vamm
 from tabs.vaults import vaults
-
+from tabs.condliq import condliqcheck
 
 # import ssl
 # import urllib.request
@@ -119,6 +119,7 @@ def main():
         "vAMM",
         "FundingHistory",
         "UserDataRaw",
+        "ConditionalLiquidity",
         "Vaults",
         "DriftDraw",
         "Openbookv2",
@@ -282,6 +283,9 @@ def main():
     elif tab.lower() == "vamm":
         loop = asyncio.new_event_loop()
         loop.run_until_complete(vamm(clearing_house))
+    elif tab.lower() == 'conditionalliquidity':
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(condliqcheck(clearing_house))
     # elif tab.lower() == 'network':
     #     loop = asyncio.new_event_loop()
     #     loop.run_until_complete(show_network(clearing_house))
