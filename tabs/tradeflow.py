@@ -2,14 +2,14 @@ import datetime
 
 import pandas as pd
 
-
 pd.options.plotting.backend = "plotly"
-from constants import ALL_MARKET_NAMES
-from datafetch.api_fetch import get_trades_for_range_pandas
-from datafetch.s3_fetch import load_s3_trades_data
 import numpy as np
 import pytz
 import streamlit as st
+
+from constants import ALL_MARKET_NAMES
+from datafetch.api_fetch import get_trades_for_range_pandas
+from datafetch.s3_fetch import load_s3_trades_data
 
 
 def dedupdf(all_markets, market_name, lookahead=60):
@@ -50,8 +50,11 @@ def dedupdf(all_markets, market_name, lookahead=60):
             "date",
         ]
     ).reset_index(drop=True)
-    oracle_series = df1.groupby("ts")["oraclePrice"].last()
+    oracle_series = pd.to_numeric(df1.groupby("ts")["oraclePrice"].last())
 
+    df1["quoteAssetAmountFilled"] = pd.to_numeric(df1["quoteAssetAmountFilled"])
+    df1["baseAssetAmountFilled"] = pd.to_numeric(df1["baseAssetAmountFilled"])
+    df1["oraclePrice"] = pd.to_numeric(df1["oraclePrice"])
     df1["markPrice"] = df1["quoteAssetAmountFilled"] / df1["baseAssetAmountFilled"]
     df1["buyPrice"] = np.nan
     df1["sellPrice"] = np.nan
@@ -60,10 +63,12 @@ def dedupdf(all_markets, market_name, lookahead=60):
     ]
     df1["sellPrice"] = df1.loc[df1["takerOrderDirection"] == "short", "markPrice"]
 
-    df1["takerPremium"] = (df1["markPrice"] - df1["oraclePrice"]) * (
-        2 * (df1["takerOrderDirection"] == "long") - 1
+    df1["takerPremium"] = (
+        pd.to_numeric(df1["markPrice"]) - pd.to_numeric(df1["oraclePrice"])
+    ) * (2 * (df1["takerOrderDirection"] == "long") - 1)
+    df1["takerPremiumDollar"] = pd.to_numeric(df1["takerPremium"]) * pd.to_numeric(
+        df1["baseAssetAmountFilled"]
     )
-    df1["takerPremiumDollar"] = df1["takerPremium"] * df1["baseAssetAmountFilled"]
     df1["takerPremiumNextMinute"] = (
         df1["markPrice"]
         - df1["ts"].apply(
@@ -217,8 +222,8 @@ def trade_flow_analysis():
                     "takerPremium": "mean",
                     "takerPremiumNextMinute": "mean",
                     "takerPremiumDollar": "sum",
-                    "takerFee": "sum",
-                    "makerFee": "sum",
+                    "takerFee": lambda x: pd.to_numeric(x).sum(),
+                    "makerFee": lambda x: pd.to_numeric(x).sum(),
                 }
             )
         )
@@ -245,8 +250,8 @@ def trade_flow_analysis():
                     "takerPremium": "mean",
                     "takerPremiumNextMinute": "mean",
                     "takerPremiumDollar": "sum",
-                    "takerFee": "sum",
-                    "makerFee": "sum",
+                    "takerFee": lambda x: pd.to_numeric(x).sum(),
+                    "makerFee": lambda x: pd.to_numeric(x).sum(),
                 }
             )
         )
@@ -267,12 +272,11 @@ def trade_flow_analysis():
         st.dataframe(df2)
 
     if user_type != "vAMM":
-
         zol1, zol2, zol3 = st.columns(3)
 
-        takerfee = solperp["takerFee"].sum()
-        makerfee = solperp["makerFee"].sum()
-        fillerfee = solperp["fillerReward"].sum()
+        takerfee = pd.to_numeric(solperp["takerFee"]).sum()
+        makerfee = pd.to_numeric(solperp["makerFee"]).sum()
+        fillerfee = pd.to_numeric(solperp["fillerReward"]).sum()
 
         showprem = zol3.radio("show premiums in plot", [True, False], 1)
         showmarkoutfees = zol3.radio(
@@ -401,7 +405,7 @@ def trade_flow_analysis():
         st.metric(
             "vAMM volume:",
             "$" + f"{vamm_maker_trades['quoteAssetAmountFilled'].sum().round(2):,}",
-            f"{vamm_maker_trades['quoteAssetAmountFilled'].sum().round(2)/solperp['quoteAssetAmountFilled'].sum().round(2)*100:,.2f}% of maker volume",
+            f"{vamm_maker_trades['quoteAssetAmountFilled'].sum().round(2) / solperp['quoteAssetAmountFilled'].sum().round(2) * 100:,.2f}% of maker volume",
         )
         tabs = st.tabs(["plot", "table"])
 
