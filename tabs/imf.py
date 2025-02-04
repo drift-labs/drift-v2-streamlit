@@ -204,11 +204,15 @@ async def imf_page(clearing_house: DriftClient):
             
             # Calculate effective weight
             base_weight = init_weight
-            if imf != 0:
-                base_weight = base_weight * 0.8  # Discount when IMF active
-            
-            ddsize = np.sqrt(np.abs(base))
-            effective_weight = max(init_weight, base_weight + imf * ddsize)
+            if weight_type == "Liability (Borrow)":
+                if imf != 0:
+                    base_weight = base_weight * 0.8  # Discount when IMF active
+                
+                ddsize = np.sqrt(np.abs(base))
+                effective_weight = max(init_weight, base_weight + imf * ddsize)
+            else:
+                ddsize = np.sqrt(np.abs(base))
+                effective_weight = min(init_weight, (1.1) - imf * ddsize)
             
             if weight_type == "Asset (Collateral)":
                 st.write(f"Base Asset Weight: {init_weight:.3f}")
@@ -233,11 +237,17 @@ async def imf_page(clearing_house: DriftClient):
         
         def calc_effective_weight(weight, imf, size, is_liability=True):
             base_weight = weight
-            if imf != 0:
-                base_weight = weight * 0.8
-            dd = np.sqrt(np.abs(size))
-            effective = max(weight, base_weight + imf * dd)
-            return 1/effective if is_liability else effective
+
+            if is_liability:
+                if imf != 0:
+                    base_weight = weight * 0.8
+                dd = np.sqrt(np.abs(size))
+                effective = max(weight, base_weight + imf * dd)
+                return 1/effective if is_liability else effective
+            else:
+                dd = np.sqrt(np.abs(size))
+                effective = min(weight, (1.1) - imf * dd)
+                return effective
         
         is_liability = weight_type == "Liability (Borrow)"
         df = pd.Series([calc_effective_weight(init_weight, imf, x, is_liability) for x in index])
