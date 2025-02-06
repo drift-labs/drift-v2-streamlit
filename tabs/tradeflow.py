@@ -282,8 +282,12 @@ def trade_flow_analysis():
         showmarkoutfees = zol3.radio(
             "show spread vs oracle w/ markout", [True, False], 1
         )
+        liq_only = zol3.radio("liquidations only", [True, False], 1)
 
         pol1, pol2 = st.columns(2)
+        if liq_only:
+            solperp = solperp[solperp['actionExplanation'].str.contains('liquidation', case=False, na=False)]
+        
         trade_df = solperp.set_index("date").sort_index()[
             ["buyPrice", "oraclePrice", "sellPrice"]
         ]
@@ -344,6 +348,25 @@ def trade_flow_analysis():
             f"${takerfee:,.2f}",
             f"${-makerfee:,.2f} in liq/maker rebates, ${fillerfee:,.2f} in filler rewards",
         )
+
+        if liq_only:
+            takerfee_liq_only = pd.to_numeric(solperp["takerFee"]).sum()
+            makerfee_liq_only = pd.to_numeric(solperp["makerFee"]).sum()
+            fillerfee_liq_only = pd.to_numeric(solperp["fillerReward"]).sum()
+            zol2.metric(
+                f"{tt} Liquidations Only Taker Fees:",
+                f"${takerfee_liq_only:,.2f}",
+            )
+            zol2.metric(
+                f"{tt} Liquidations Only Maker Fees:",
+                f"${makerfee_liq_only:,.2f}",
+            )
+            zol2.metric(
+                f"{tt} Liquidations Only Filler Rewards:",
+                f"${fillerfee_liq_only:,.2f}",
+            )
+
+
 
         st.code(
             f"Note: bot classfication is for users who have placed {botcutoff}+ orders in a single market"
