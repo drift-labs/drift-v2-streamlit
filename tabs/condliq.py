@@ -77,22 +77,23 @@ async def condliqcheck(clearing_house: DriftClient):
             def is_labeled_for_cond(user, user_stats):
                 is_t = False
                 if user.next_order_id > 3000:
-                    st.write('next_order_id:', user.next_order_id)
+                    st.write('high next_order_id:', user.next_order_id)
                     is_t = True
                 
                 if user_stats.number_of_sub_accounts_created > 10:
-                    st.write('number_of_sub_accounts_created:', user_stats.number_of_sub_accounts_created)
+                    st.write('high number_of_sub_accounts_created:', user_stats.number_of_sub_accounts_created)
                     is_t = True
 
                 if user_stats.disable_update_perp_bid_ask_twap:
+                    st.write('user_incorrectly_update_twap:', user_stats.disable_update_perp_bid_ask_twap)
                     is_t = True
                 return is_t
             
             is_t1 = is_labeled_for_cond(user, userstats)
             if not is_t1:
-                st.write('User is non-toxic:', is_labeled_for_cond(user, userstats))
+                st.write('User is not labeled unformed flow:', is_t1)
             else:
-                st.write('User non exempt, can only atomically take at conditional prices against protected maker')
+                st.write('User is informed flow, non exempt, can only atomically take at conditional prices against protected maker')
             return 0
             # st.json(json.dumps(userstats.__dict__, cls=UserAccountEncoder))
 
