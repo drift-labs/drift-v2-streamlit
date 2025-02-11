@@ -91,9 +91,9 @@ async def condliqcheck(clearing_house: DriftClient):
             
             is_t1 = is_labeled_for_cond(user, userstats)
             if not is_t1:
-                st.write('User is not labeled informed flow:', is_t1)
+                st.write('User is not labeled informed flow')
             else:
-                st.write('User is informed flow, non exempt, can only atomically take at conditional prices against protected maker')
+                st.write('User is labeled informed flow, can only atomically take at conditional prices posted by protected makers')
             return 0
             # st.json(json.dumps(userstats.__dict__, cls=UserAccountEncoder))
 
