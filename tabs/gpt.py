@@ -1,32 +1,39 @@
-
+import csv
 import sys
 from tokenize import tabsize
+
 import driftpy
-import pandas as pd 
-import numpy as np 
-import csv 
+import numpy as np
+import pandas as pd
+
 pd.options.plotting.backend = "plotly"
 
 # from driftpy.constants.config import configs
-from anchorpy import Provider, Wallet
-from solders.keypair import Keypair
-from solana.rpc.async_api import AsyncClient
+import asyncio
+import json
+import os
+from dataclasses import dataclass
+from glob import glob
+
+import openai
+import streamlit as st
+from anchorpy import EventParser, Provider, Wallet
+from driftpy.accounts import (
+    get_perp_market_account,
+    get_spot_market_account,
+    get_state_account,
+    get_user_account,
+)
+from driftpy.constants.numeric_constants import *
+from driftpy.constants.perp_markets import PerpMarketConfig, devnet_perp_market_configs
+from driftpy.constants.spot_markets import SpotMarketConfig, devnet_spot_market_configs
 from driftpy.drift_client import DriftClient
 from driftpy.drift_user import DriftUser
-from driftpy.accounts import get_perp_market_account, get_spot_market_account, get_user_account, get_state_account
-from driftpy.constants.numeric_constants import * 
-import os
-import json
-import streamlit as st
-from driftpy.constants.spot_markets import devnet_spot_market_configs, SpotMarketConfig
-from driftpy.constants.perp_markets import devnet_perp_market_configs, PerpMarketConfig
-from dataclasses import dataclass
+from solana.rpc.async_api import AsyncClient
+from solders.keypair import Keypair
 from solders.pubkey import Pubkey
+
 from helpers import serialize_perp_market_2, serialize_spot_market
-from anchorpy import EventParser
-import asyncio
-from glob import glob
-import openai
 
 DRIFT_CONTEXT = """
 ```
@@ -260,62 +267,60 @@ Additionally, during the cooldown period, if a user wishes to cancel the unstake
 """
 
 
-
-
-async def gpt_page(clearing_house: DriftClient): 
-
+async def gpt_page(clearing_house: DriftClient):
     gpt_ans = ""
 
     ch = clearing_house
     # state = await get_state_account(ch.program)
-    col1, col2, col22, col3 = st.columns([6,2,2,1])
-    OPENAI_API_KEY = col22.text_input('OPENAI_API_KEY', '')
-    if OPENAI_API_KEY!='' and len(OPENAI_API_KEY) > 4:
-        os.environ['OPENAI_API_KEY'] = OPENAI_API_KEY
+    col1, col2, col22, col3 = st.columns([6, 2, 2, 1])
+    OPENAI_API_KEY = col22.text_input("OPENAI_API_KEY", "")
+    if OPENAI_API_KEY != "" and len(OPENAI_API_KEY) > 4:
+        os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
         openai.api_key = OPENAI_API_KEY
 
-    user_q = col1.text_area('ask drift-gpt:')
+    user_q = col1.text_area("ask drift-gpt:")
 
-    def do_gpt(user_q, mode='boring'):
+    def do_gpt(user_q, mode="boring"):
         og_user_q = str(user_q)
         user_q = str(user_q)
         context = ""
-        if 'insurance' in user_q or 'pool' in user_q or 'pnl' in user_q.lower():
+        if "insurance" in user_q or "pool" in user_q or "pnl" in user_q.lower():
             context = INSURANCE_POOL_CONTEXT
         else:
             context = DRIFT_CONTEXT
 
-        if '?' not in user_q:
-            user_q+='?'
+        if "?" not in user_q:
+            user_q += "?"
 
-        if mode == 'cheeky':
-            user_q = 'answer tongue-in-cheek and party casual style. ' + user_q
-        elif mode == 'uberzahl':
-            user_q = 'answer in style of sophisticated mid-century mad-scientist. ' + user_q
-        elif mode == 'boring':
-            user_q = 'answer in style of a know-it-all smart contract developer. ' + user_q
+        if mode == "cheeky":
+            user_q = "answer tongue-in-cheek and party casual style. " + user_q
+        elif mode == "uberzahl":
+            user_q = (
+                "answer in style of sophisticated mid-century mad-scientist. " + user_q
+            )
+        elif mode == "boring":
+            user_q = (
+                "answer in style of a know-it-all smart contract developer. " + user_q
+            )
         completion = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo", 
-        messages=[{"role": "user", "content": context + user_q}]
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": context + user_q}],
         )
 
-        with open('gpt_database.csv','a', newline='') as f:
+        with open("gpt_database.csv", "a", newline="") as f:
             writer = csv.writer(f)
             cont = str(completion.choices[0].message.content)
-            createtime = (completion.created)
+            createtime = completion.created
             writer.writerow([og_user_q, mode, createtime, cont])
 
         return completion
-     
-    is_clicked = col2.button('submit')  
-    mode = col3.radio('mode:', ['cheeky', 'uberzahl', 'boring'])
+
+    is_clicked = col2.button("submit")
+    mode = col3.radio("mode:", ["cheeky", "uberzahl", "boring"])
     if is_clicked and len(user_q):
-        gpt_ans = do_gpt(user_q, mode) 
+        gpt_ans = do_gpt(user_q, mode)
         is_clicked = False
 
     if gpt_ans:
-        st.write('> ' + str(gpt_ans.choices[0].message.content))
+        st.write("> " + str(gpt_ans.choices[0].message.content))
         st.json(gpt_ans, expanded=False)
-
-
-

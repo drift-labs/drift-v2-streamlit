@@ -1,28 +1,20 @@
 import asyncio
 import datetime
-import json
-from math import exp
 import os
-from urllib.request import urlopen
 
-from anchorpy import Provider
-from anchorpy import Wallet
+import pandas as pd
+import streamlit as st
+from anchorpy import Provider, Wallet
 from dotenv import load_dotenv
 from driftpy.constants.config import configs
-from driftpy.drift_client import AccountSubscriptionConfig
-from driftpy.drift_client import DriftClient
-import numpy as np
-import pandas as pd
-import plotly.express as px
-import plotly.graph_objs as go
-from plotly.subplots import make_subplots
+from driftpy.drift_client import AccountSubscriptionConfig, DriftClient
 from solana.rpc.async_api import AsyncClient
 from solders.keypair import Keypair
-import streamlit as st
 
 # from network import show_network
 from tabs.api import show_api
 from tabs.competition import competitions
+from tabs.condliq import condliqcheck
 from tabs.fee_income import fee_income_page
 from tabs.fees import fee_page
 from tabs.funding_history import funding_history
@@ -52,7 +44,6 @@ from tabs.userstatus import userstatus_page
 from tabs.uservolume import show_user_volume
 from tabs.vamm import vamm
 from tabs.vaults import vaults
-from tabs.condliq import condliqcheck
 
 # import ssl
 # import urllib.request
@@ -63,7 +54,7 @@ load_dotenv()
 
 try:
     from tabs.backtester import backtester_page
-except:
+except ImportError:
     pass
 
 
@@ -181,6 +172,10 @@ def main():
             )
             + " days",
         )
+        import driftpy
+
+        st.write(driftpy.__version__)
+
         st.markdown(
             """
         On this site, did you know you can...
@@ -283,7 +278,7 @@ def main():
     elif tab.lower() == "vamm":
         loop = asyncio.new_event_loop()
         loop.run_until_complete(vamm(clearing_house))
-    elif tab.lower() == 'conditionalliquidity':
+    elif tab.lower() == "conditionalliquidity":
         loop = asyncio.new_event_loop()
         loop.run_until_complete(condliqcheck(clearing_house))
     # elif tab.lower() == 'network':
@@ -303,7 +298,6 @@ def main():
         loop = asyncio.new_event_loop()
         loop.run_until_complete(imf_page(clearing_house))
     elif tab.lower() == "social":
-
         repo = "https://github.com/drift-labs/protocol-v2"
         st.markdown(
             "["
@@ -320,9 +314,9 @@ def main():
         st.header("twitter:")
         st.table(pd.Series(tweets))
 
-    elif tab.lower() == "platyperps":
-        loop = asyncio.new_event_loop()
-        loop.run_until_complete(show_platyperps(clearing_house))
+    # elif tab.lower() == "platyperps":
+    #     loop = asyncio.new_event_loop()
+    #     loop.run_until_complete(show_platyperps(clearing_house))
 
     elif tab.lower() == "drift-gpt":
         loop = asyncio.new_event_loop()
