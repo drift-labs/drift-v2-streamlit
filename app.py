@@ -44,6 +44,7 @@ from tabs.userstatus import userstatus_page
 from tabs.uservolume import show_user_volume
 from tabs.vamm import vamm
 from tabs.vaults import vaults
+from tabs.liqcalc import liqcalc
 
 # import ssl
 # import urllib.request
@@ -118,6 +119,7 @@ def main():
         "UsersInMarket",
         "Backtester",
         "MM (legacy)",
+        'Liquidation Calculator',
         #   'Social', 'PlatyPerps'
     )
     query_index = 0
@@ -328,11 +330,12 @@ def main():
     elif tab.lower() == "userdataraw":
         loop = asyncio.new_event_loop()
         loop.run_until_complete(userdataraw(clearing_house))
-
+    elif tab.lower() == "liquidation calculator":
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(liqcalc(clearing_house))
     elif tab.lower() == "fundinghistory":
         loop = asyncio.new_event_loop()
         loop.run_until_complete(funding_history(clearing_house, env))
-
     elif tab.lower() == "vaults":
         loop = asyncio.new_event_loop()
         loop.run_until_complete(vaults(clearing_house, env))
