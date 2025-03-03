@@ -17,10 +17,19 @@ async def show_user_stats(clearing_house: DriftClient):
     ch = clearing_house
 
     if "user_stats_df" not in st.session_state:
+        start_time = time.time()
+
+        # Fetch user stats
+        fetch_start = time.time()
         all_user_stats = await ch.program.account["UserStats"].all()
+        fetch_end = time.time()
+        fetch_duration = fetch_end - fetch_start
+
         kp = Keypair()
         ch = DriftClient(ch.program, kp)
 
+        # Process data
+        process_start = time.time()
         df_rr = pd.DataFrame([x.account.__dict__ for x in all_user_stats])
         fees_df = pd.DataFrame([x.account.fees.__dict__ for x in all_user_stats])
 
@@ -98,10 +107,27 @@ async def show_user_stats(clearing_house: DriftClient):
             .sort_values("last_trade_seconds_ago")
             .reset_index(drop=True)
         )
+        process_end = time.time()
+        process_duration = process_end - process_start
+
+        total_duration = time.time() - start_time
 
         st.session_state.user_stats_df = df
+        st.session_state.timing_stats = {
+            "fetch_time": fetch_duration,
+            "process_time": process_duration,
+            "total_time": total_duration,
+            "record_count": len(df),
+        }
 
     df = st.session_state.user_stats_df
+
+    # Display timing stats
+    if "timing_stats" in st.session_state:
+        stats = st.session_state.timing_stats
+        st.info(
+            f"Data stats: {stats['record_count']} records | Fetch: {stats['fetch_time']:.2f}s | Process: {stats['process_time']:.2f}s | Total: {stats['total_time']:.2f}s"
+        )
 
     tab_names = ["Volume", "New Signups", "Refferals", "Fillers", "Clusters"]
     if "userstats_active_tab" not in st.session_state:
@@ -127,6 +153,13 @@ async def show_user_stats(clearing_house: DriftClient):
 
 def render_volume_tab(df):
     pie1, pie2 = st.columns(2)
+
+    _old_df = df
+
+    min_volume_value = st.number_input(
+        "Minimum 30 day volume (dollars)", min_value=0, max_value=1000000, value=100
+    )
+    df = df[df["taker_volume30d_calc"] > min_volume_value]
 
     net_vamm_maker_volume = (
         df["taker_volume30d_calc"].sum() - df["maker_volume30d_calc"].sum()
@@ -198,11 +231,29 @@ def render_volume_tab(df):
         str(np.round(net_vamm_maker_volume / 1e6, 2)) + "M",
     )
 
-    st.dataframe(df)
-    df2download2 = df.to_csv(escapechar='"').encode("utf-8")
-    st.download_button(
-        label="user stats full [bytes=" + str(len(df)) + "]",
-        data=df2download2,
+    sorted_df = df.sort_values("total_30d_volume_calc", ascending=False)
+
+    display_df = sorted_df
+
+    st.info(
+        f"There are {len(display_df)} traders who traded ${min_volume_value:,} or more volume in the last 30 days"
+    )
+    st.dataframe(display_df)
+
+    col1, col2 = st.columns(2)
+
+    df2download_top = sorted_df.head(2000).to_csv(escapechar='"').encode("utf-8")
+    col1.download_button(
+        label=f"Download top 2000 traders [bytes={len(df2download_top)}]",
+        data=df2download_top,
+        file_name="userstats_top2000.csv",
+        mime="text/csv",
+    )
+
+    df2download_full = df.to_csv(escapechar='"').encode("utf-8")
+    col2.download_button(
+        label=f"Download all traders [bytes={len(df2download_full)}]",
+        data=df2download_full,
         file_name="userstats_full.csv",
         mime="text/csv",
     )
@@ -399,7 +450,14 @@ def render_fillers_tab(df):
 
 
 def render_clusters_tab(df):
-    st.write(df["total_fee_paid"].sum(), df["total_fee_rebate"].sum())
+    numeric_df = df.select_dtypes(include=["number"])
+
+    st.markdown(f"Total fees paid: ${df['total_fee_paid'].sum():,.2f} ")
+    st.markdown(f"Total fee rebates: ${df['total_fee_rebate'].sum():,.2f}")
+
+    st.write("Correlation matrix between numeric features:")
+    st.write(numeric_df.corr())
+
     dff = df[df["total_30d_volume_calc"] > 0].sort_values("total_30d_volume_calc")
     dd = dff[
         [
@@ -410,5 +468,4 @@ def render_clusters_tab(df):
     ].pipe(np.sqrt)
     fig = dd.plot(kind="scatter")
 
-    st.write(df.corr())
     st.plotly_chart(fig)
