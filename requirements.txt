@@ -1,7 +1,7 @@
 aiocache
 anchorpy
 ccxt
-driftpy>=0.8.15
+driftpy>=0.8.25
 numpy
 openai
 pandas
