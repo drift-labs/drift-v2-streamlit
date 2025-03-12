@@ -1,29 +1,32 @@
 import copy
 import logging
-import time
 
 import pandas as pd
 import streamlit as st
 from driftpy.account_subscription_config import AccountSubscriptionConfig
-from driftpy.accounts.cache import (
-    CachedDriftClientAccountSubscriber,
-    CachedUserAccountSubscriber,
-)
-from driftpy.accounts.ws import mainnet_perp_market_configs
+from driftpy.accounts.cache import CachedUserAccountSubscriber
 from driftpy.addresses import get_user_account_public_key
+from driftpy.constants.numeric_constants import QUOTE_PRECISION
 from driftpy.drift_client import DriftClient
 from driftpy.drift_user import DriftUser
 from driftpy.math.spot_balance import StrictOraclePrice
 from driftpy.oracles.oracle_id import get_oracle_id
+from driftpy.types import SpotPosition
 from solders.pubkey import Pubkey
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+def get_market_name(market):
+    """Extract human-readable market name from bytes."""
+    return bytes(market.name).decode("utf-8").strip("\x00")
+
+
 async def get_all_subaccounts(drift_client: DriftClient, authority: Pubkey):
+    """Find all subaccounts for a given authority."""
     subaccounts = []
-    for sub_id in range(7):
+    for sub_id in range(10):
         user_account_pk = get_user_account_public_key(
             drift_client.program_id, authority, sub_id
         )
@@ -52,6 +55,7 @@ async def get_all_subaccounts(drift_client: DriftClient, authority: Pubkey):
 
 
 async def is_subaccount(pubkey: Pubkey, drift_client: DriftClient):
+    """Check if a public key belongs to a subaccount."""
     try:
         user = DriftUser(
             drift_client,
@@ -69,283 +73,506 @@ async def is_subaccount(pubkey: Pubkey, drift_client: DriftClient):
 
 
 async def liqcalc(drift_client: DriftClient):
-    pd.options.plotting.backend = "plotly"
-    logger.info("Starting liqcalc")
+    """Main liquidation calculator function."""
+    st.title("Drift Liquidation Calculator")
 
-    authority_str = st.text_input("Authority or User Account:")
+    if "clearing_house_cache" not in st.session_state:
+        st.session_state.clearing_house_cache = None
+    if "original_token_amounts" not in st.session_state:
+        st.session_state.original_token_amounts = {}
 
-    if len(authority_str) <= 5:
+    authority_str = st.text_input(
+        "Authority or User Account:",
+        help="Enter an authority address or subaccount address",
+    )
+
+    if not authority_str or len(authority_str) <= 5:
         st.write("Enter an authority or user account to get started")
         return
 
-    account = await is_subaccount(Pubkey.from_string(authority_str), drift_client)
-    if account:
-        st.write(
-            f"This account is a subaccount, instead please use `{account.get_user_account().authority}` and select this subaccount."
-        )
-        return
     try:
-        authority = Pubkey.from_string(authority_str)
-        subaccounts = await get_all_subaccounts(drift_client, authority)
-        if not subaccounts:
-            st.error("No subaccounts found for this authority")
-            return
-
-        options = [
-            f"{sub['sub_id']}: {sub['name']} ({sub['pubkey']})" for sub in subaccounts
-        ]
-        selected = st.selectbox(
-            "Select subaccount:",
-            options,
-            format_func=lambda x: x,
-        )
-        if not selected:
-            return
-        user_pubkey = Pubkey.from_string(selected.split("(")[1].rstrip(")"))
-
+        input_pubkey = Pubkey.from_string(authority_str.strip())
     except Exception:
-        user_pubkey = Pubkey.from_string(authority_str)
-
-    mode = st.radio("Mode:", ["raw", "sdk"], index=1)
-    if mode != "sdk":
+        st.error("Invalid address format")
         return
 
-    try:
-        user = DriftUser(
-            drift_client,
-            user_public_key=user_pubkey,
-            account_subscription=AccountSubscriptionConfig("cached"),
+    account = await is_subaccount(input_pubkey, drift_client)
+    if account:
+        st.warning(
+            f"This address is a subaccount. Please use the authority address `{account.get_user_account().authority}` instead."
         )
-        if not isinstance(user.account_subscriber, CachedUserAccountSubscriber):
-            raise Exception("User account subscriber is not cached")
-
-        await user.account_subscriber.update_cache()
-
-    except Exception as e:
-        logger.error(f"Error getting user account: {e}")
-        st.write("This account has the following subaccounts:")
-        subaccounts = await get_all_subaccounts(drift_client, user_pubkey)
-        for subaccount in subaccounts:
-            st.markdown(
-                f"Subaccount {subaccount['sub_id']} :green[{subaccount['name']}]  👉 {subaccount['pubkey']}",
-            )
         return
 
-    st.write("Authority:", user.get_user_account().authority)
-
-    if not isinstance(
-        drift_client.account_subscriber, CachedDriftClientAccountSubscriber
-    ):
-        raise Exception("Clearing house account subscriber is not cached")
-
-    user_authority = str(user.get_user_account().authority)
-
-    st.markdown(
-        "### Price Shock",
-        help="This section allows you to manipulate the oracle price of selected PERP markets.",
-    )
-    market_config_map = mainnet_perp_market_configs
-    market_names = [market.symbol for market in market_config_map]
-
-    selected_markets = st.multiselect(
-        "Select which PERP markets to manipulate the oracle price:",
-        market_names,
-        default=[market_names[0]] if market_names else [],
-        help="Pick the markets whose oracle price you want to shift.",
+    authority_changed = (
+        "current_authority" not in st.session_state
+        or st.session_state.current_authority != authority_str
     )
 
-    price_change_map = {}
-    for mkt_name in selected_markets:
-        price_change_map[mkt_name] = st.number_input(
-            f"{mkt_name} Price Change (%)", value=0, step=1, format="%d"
-        )
+    if authority_changed:
+        st.session_state.current_authority = authority_str
+        st.session_state.clearing_house_cache = None
+        st.session_state.user_and_slot = None
+        st.session_state.subaccount = None
+        st.session_state.original_token_amounts = {}
 
-    show_balance_adjustments = st.checkbox("Adjust balances?", value=False)
+    authority = Pubkey.from_string(authority_str)
 
-    balance_changes = {}
-    if show_balance_adjustments:
-        st.markdown(
-            "### Balance Adjustments",
-            help="This section allows you to manipulate the balance of your spot holdings.",
-        )
+    with st.spinner("Fetching subaccounts..."):
+        subaccounts = await get_all_subaccounts(drift_client, authority)
 
-        await drift_client.account_subscriber.update_cache()
-        active_spot_positions = user.get_active_spot_positions()
-        spot_markets = {
-            pos.market_index: user.get_spot_market_account(pos.market_index)
-            for pos in active_spot_positions
-        }
+    if not subaccounts:
+        st.error("No subaccounts found for this authority")
+        return
 
-        for market_idx, spot_market in spot_markets.items():
-            if not spot_market:
-                continue
-            market_name = "".join(map(chr, spot_market.name)).strip()
-            current_balance = user.get_token_amount(market_idx) / (
-                10**spot_market.decimals
+    options = [
+        f"{sub['sub_id']}: {sub['name']} ({sub['pubkey']})" for sub in subaccounts
+    ]
+    selected = st.selectbox(
+        "Select subaccount:",
+        options,
+        format_func=lambda x: x,
+        help="Select which subaccount to analyze",
+    )
+
+    if not selected:
+        return
+
+    user_pubkey = Pubkey.from_string(selected.split("(")[1].rstrip(")"))
+    selected_sub_id = int(selected.split(":")[0])
+
+    if st.session_state.clearing_house_cache is None:
+        with st.spinner("Initializing market data... (this may take a minute...)"):
+            await drift_client.account_subscriber.update_cache()
+            st.session_state.clearing_house_cache = copy.deepcopy(
+                drift_client.account_subscriber.cache
             )
 
-            col1, col2 = st.columns([3, 2])
-            with col1:
-                st.text(f"Current {market_name} balance: {current_balance:.4f}")
-            with col2:
-                balance_changes[market_idx] = st.number_input(
-                    f"{market_name} Balance Change",
-                    value=0.0,
-                    step=0.1,
-                    format="%.4f",
-                    key=f"balance_{market_idx}",
-                )
+    drift_client.account_subscriber.cache = copy.deepcopy(
+        st.session_state.clearing_house_cache
+    )
 
-    if st.button("Submit"):
-        st.write("Updating caches and calculating positions...")
+    subaccount_changed = (
+        "subaccount" not in st.session_state
+        or st.session_state.subaccount != selected_sub_id
+    )
 
-        await drift_client.account_subscriber.update_cache()
-        await user.account_subscriber.update_cache()
+    user = DriftUser(
+        drift_client,
+        user_public_key=user_pubkey,
+        account_subscription=AccountSubscriptionConfig("cached"),
+    )
 
-        original_cache = drift_client.account_subscriber.cache
-        manipulated_cache = copy.deepcopy(original_cache)
-        oracle_data = manipulated_cache["oracle_price_data"]
+    if not isinstance(user.account_subscriber, CachedUserAccountSubscriber):
+        raise Exception("User account subscriber is not cached")
 
-        for mkt_name, pct_change in price_change_map.items():
-            cfg = next(
-                (
-                    market
-                    for market in mainnet_perp_market_configs
-                    if market.symbol == mkt_name
-                ),
-                None,
+    if subaccount_changed:
+        with st.spinner("Loading subaccount data..."):
+            await user.account_subscriber.update_cache()
+            st.session_state.subaccount = selected_sub_id
+            st.session_state.user_and_slot = copy.deepcopy(
+                user.account_subscriber.user_and_slot
             )
-            if not cfg:
-                st.error(f"Market {mkt_name} not found")
+
+            for key in list(st.session_state.keys()):
+                if key.startswith("price_") or key.startswith("balance_"):
+                    del st.session_state[key]
+
+            if not st.session_state.user_and_slot:
+                st.info("No data found for this subaccount")
                 return
-            oracle_key = get_oracle_id(cfg.oracle, cfg.oracle_source)
-            if oracle_key in oracle_data:
-                print("Hit")
-                old_price = oracle_data[oracle_key].data.price
-                new_price = old_price * (1 + pct_change / 100.0)
-                oracle_data[oracle_key].data.price = new_price
-                logger.info(
-                    f"Applied {pct_change}% change to {mkt_name}, "
-                    f"price: {old_price} -> {new_price}"
+    else:
+        user.account_subscriber.user_and_slot = copy.deepcopy(
+            st.session_state.user_and_slot
+        )
+
+    spot_positions = user.get_active_spot_positions()
+    perp_positions = user.get_active_perp_positions()
+
+    if not spot_positions and not perp_positions:
+        st.info("No active positions found for this account")
+        return
+
+    adjustment_mode = st.radio(
+        "Adjustment Mode",
+        ["Value", "Percentage"],
+        horizontal=True,
+        key="adjustment_mode",
+        help="Choose whether to adjust by direct value or percentage change",
+    )
+
+    oracle_markets = {}
+
+    for pos in perp_positions:
+        market = user.get_perp_market_account(pos.market_index)
+        oracle_key = get_oracle_id(market.amm.oracle, market.amm.oracle_source)
+        if oracle_key not in oracle_markets:
+            oracle_markets[oracle_key] = []
+        oracle_markets[oracle_key].append(
+            {
+                "type": "perp",
+                "market": market,
+                "name": get_market_name(market),
+                "index": pos.market_index,
+            }
+        )
+
+    max_spot_decimals = 0
+    for pos in spot_positions:
+        market = user.get_spot_market_account(pos.market_index)
+        oracle_key = get_oracle_id(market.oracle, market.oracle_source)
+        if oracle_key not in oracle_markets:
+            oracle_markets[oracle_key] = []
+        oracle_markets[oracle_key].append(
+            {
+                "type": "spot",
+                "market": market,
+                "name": get_market_name(market),
+                "index": pos.market_index,
+            }
+        )
+        max_spot_decimals = max(max_spot_decimals, market.decimals)
+
+    st.subheader(
+        "Oracle Price Adjustments",
+        help="Adjust oracle prices to see impact on liquidation thresholds",
+    )
+
+    price_changes = {}
+    price_cols = st.columns(3)
+
+    for i, (oracle_key, markets) in enumerate(oracle_markets.items()):
+        market_names = [m["name"] for m in markets]
+        market_str = " / ".join(market_names)
+
+        market = markets[0]["market"]
+        if markets[0]["type"] == "perp":
+            oracle_data = user.get_oracle_data_for_perp_market(markets[0]["index"])
+        else:
+            oracle_data = user.get_oracle_data_for_spot_market(markets[0]["index"])
+
+        initial_price = float(oracle_data.price) / QUOTE_PRECISION
+
+        value_key = f"price_value_{oracle_key}"
+        pct_key = f"price_pct_change_{oracle_key}"
+        col = price_cols[i % 3]
+
+        if adjustment_mode == "Value":
+            if value_key not in st.session_state:
+                if pct_key in st.session_state:
+                    st.session_state[value_key] = initial_price * (
+                        1 + st.session_state[pct_key] / 100
+                    )
+                else:
+                    st.session_state[value_key] = initial_price
+
+            new_price = col.number_input(
+                f"{market_str} price ($)",
+                min_value=0.0,
+                value=st.session_state[value_key],
+                step=0.01,
+                key=value_key,
+                format="%.6f",
+            )
+            price_changes[oracle_key] = {"price": new_price}
+
+            if new_price != initial_price:
+                st.session_state[pct_key] = (
+                    (new_price - initial_price) / initial_price
+                ) * 100
+
+        else:
+            if pct_key not in st.session_state:
+                if value_key in st.session_state:
+                    st.session_state[pct_key] = (
+                        (st.session_state[value_key] - initial_price) / initial_price
+                    ) * 100
+                else:
+                    st.session_state[pct_key] = 0.0
+
+            pct_change = col.number_input(
+                f"{market_str} price change (%)",
+                value=st.session_state[pct_key],
+                min_value=-99.0,
+                max_value=1000.0,
+                step=1.0,
+                key=pct_key,
+                format="%.2f",
+            )
+
+            new_price = initial_price * (1 + pct_change / 100)
+            price_changes[oracle_key] = {"price": new_price}
+
+            st.session_state[value_key] = new_price
+
+    st.subheader(
+        "Balance Adjustments",
+        help="Adjust spot token balances to see effect on account health",
+    )
+
+    collateral_changes = {}
+    collateral_cols = st.columns(3)
+
+    for i, pos in enumerate(spot_positions):
+        market = user.get_spot_market_account(pos.market_index)
+        tokens = user.get_token_amount(pos.market_index)
+        initial_ui_tokens = tokens / (10**market.decimals)
+
+        st.session_state.original_token_amounts[pos.market_index] = tokens
+
+        value_key = f"balance_value_{pos.market_index}"
+        pct_key = f"balance_pct_change_{pos.market_index}"
+        col = collateral_cols[i % 3]
+
+        if adjustment_mode == "Value":
+            if value_key not in st.session_state:
+                if pct_key in st.session_state:
+                    st.session_state[value_key] = initial_ui_tokens * (
+                        1 + st.session_state[pct_key] / 100
+                    )
+                else:
+                    st.session_state[value_key] = initial_ui_tokens
+
+            new_balance = col.number_input(
+                f"{get_market_name(market)} balance",
+                value=st.session_state[value_key],
+                step=10 ** (-market.decimals),
+                key=value_key,
+                format=f"%.{market.decimals}f",
+            )
+
+            collateral_changes[pos.market_index] = {
+                "balance": new_balance,
+                "decimals": market.decimals,
+            }
+
+            if new_balance != initial_ui_tokens and initial_ui_tokens != 0:
+                st.session_state[pct_key] = (
+                    (new_balance - initial_ui_tokens) / initial_ui_tokens
+                ) * 100
+            else:
+                st.session_state[pct_key] = 0
+
+        else:
+            if pct_key not in st.session_state:
+                if value_key in st.session_state and initial_ui_tokens != 0:
+                    st.session_state[pct_key] = (
+                        (st.session_state[value_key] - initial_ui_tokens)
+                        / initial_ui_tokens
+                    ) * 100
+                else:
+                    st.session_state[pct_key] = 0.0
+
+            pct_change = col.number_input(
+                f"{get_market_name(market)} balance change (%)",
+                value=st.session_state[pct_key],
+                min_value=-100.0,
+                step=1.0,
+                key=pct_key,
+                format="%.2f",
+            )
+
+            new_balance = initial_ui_tokens * (1 + pct_change / 100)
+            collateral_changes[pos.market_index] = {
+                "balance": new_balance,
+                "decimals": market.decimals,
+            }
+
+            st.session_state[value_key] = new_balance
+
+    if price_changes:
+        cache = copy.deepcopy(drift_client.account_subscriber.cache)
+        oracle_price_data = cache["oracle_price_data"]
+
+        for oracle_key, change_info in price_changes.items():
+            if oracle_key in oracle_price_data:
+                oracle_data = oracle_price_data[oracle_key]
+                if oracle_data and hasattr(oracle_data, "data"):
+                    original_price = oracle_data.data.price
+                    new_price = int(change_info["price"] * QUOTE_PRECISION)
+                    oracle_data.data.price = new_price
+                    logger.info(
+                        f"Applied price change to {oracle_key}, "
+                        f"price: {original_price / QUOTE_PRECISION:.6f} -> {new_price / QUOTE_PRECISION:.6f}"
+                    )
+
+        drift_client.account_subscriber.cache = cache
+
+    if collateral_changes:
+        new_positions = []
+        for pos in user.get_user_account().spot_positions:
+            if pos.market_index in collateral_changes:
+                change_info = collateral_changes[pos.market_index]
+                original_tokens = st.session_state.original_token_amounts[
+                    pos.market_index
+                ]
+                new_tokens = int(
+                    change_info["balance"] * (10 ** change_info["decimals"])
                 )
 
-        try:
-            drift_client.account_subscriber.cache = manipulated_cache
-
-            st.markdown("### Spot Positions")
-            spot_positions = []
-            for spot_pos in user.get_active_spot_positions():
-                market_idx = spot_pos.market_index
-                spot_market = user.get_spot_market_account(market_idx)
-
-                token_amount = user.get_token_amount(market_idx)
-                if show_balance_adjustments and market_idx in balance_changes:
-                    delta = int(
-                        balance_changes[market_idx] * (10**spot_market.decimals)
+                if original_tokens != 0:
+                    new_scaled_balance = int(
+                        pos.scaled_balance * (new_tokens / original_tokens)
                     )
-                    token_amount += delta
+                else:
+                    new_scaled_balance = new_tokens
 
-                market_name = "".join(map(chr, spot_market.name)).strip()
+                new_position = SpotPosition(
+                    scaled_balance=new_scaled_balance,
+                    open_bids=pos.open_bids,
+                    open_asks=pos.open_asks,
+                    cumulative_deposits=pos.cumulative_deposits,
+                    market_index=pos.market_index,
+                    balance_type=pos.balance_type,
+                    open_orders=pos.open_orders,
+                    padding=pos.padding,
+                )
+                new_positions.append(new_position)
 
-                oracle_price = user.get_oracle_data_for_spot_market(market_idx)
-                if not oracle_price:
-                    continue
+                logger.info(
+                    f"Applied balance change to {pos.market_index}, "
+                    f"balance: {original_tokens / (10 ** change_info['decimals']):.6f} -> "
+                    f"{new_tokens / (10 ** change_info['decimals']):.6f}"
+                )
+            else:
+                new_positions.append(pos)
 
-                strict_oracle_price = StrictOraclePrice(oracle_price.price, None)
+        user.account_subscriber.user_and_slot.data.spot_positions = new_positions
 
-                modified_position = copy.deepcopy(spot_pos)
-                modified_position.scaled_balance = token_amount
+    with st.spinner("Calculating liquidation thresholds..."):
+        spot_data = []
+        for pos in spot_positions:
+            market = user.get_spot_market_account(pos.market_index)
+            tokens = user.get_token_amount(pos.market_index)
+            oracle_price_data = user.get_oracle_data_for_spot_market(pos.market_index)
 
-                position = {
-                    "Market": market_name,
-                    "Current Balance": token_amount / (10**spot_market.decimals),
-                    "Cur. Price": oracle_price.price / 1e6,
-                    "Liq. Price": user.get_spot_liq_price(
-                        market_idx, modified_position.scaled_balance
-                    )
-                    / 1e6,
-                }
+            if oracle_price_data:
+                oracle_price = float(oracle_price_data.price) / QUOTE_PRECISION
+                balance = tokens / (10**market.decimals)
+                liq_price = (
+                    float(user.get_spot_liq_price(pos.market_index)) / QUOTE_PRECISION
+                )
 
-                if show_balance_adjustments:
-                    position["Delta Applied"] = balance_changes.get(market_idx, 0)
-
-                if token_amount >= 0:
+                strict_oracle_price = StrictOraclePrice(oracle_price_data.price, None)
+                if tokens >= 0:
                     val = user.get_spot_asset_value(
-                        token_amount, strict_oracle_price, spot_market, None
+                        tokens, strict_oracle_price, market, None
                     )
                 else:
                     val = user.get_spot_liability_value(
-                        token_amount, strict_oracle_price, spot_market, None, None
-                    )
-                position["Net USD Value"] = val / 1e6
-
-                spot_positions.append(position)
-
-            if spot_positions:
-                spot_df = pd.DataFrame(spot_positions)
-
-                total_value = spot_df["Net USD Value"].sum()
-
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Total Portfolio Value", f"${total_value:,.2f}")
-                with col2:
-                    st.metric(
-                        "Total Assets",
-                        f"${spot_df[spot_df['Net USD Value'] > 0]['Net USD Value'].sum():,.2f}",
-                    )
-                with col3:
-                    st.metric(
-                        "Total Liabilities",
-                        f"${abs(spot_df[spot_df['Net USD Value'] < 0]['Net USD Value'].sum()):,.2f}",
+                        tokens, strict_oracle_price, market, None, None
                     )
 
-                st.dataframe(
-                    spot_df.style.format(
-                        {
-                            "Current Balance": "{:.4f}",
-                            "Delta Applied": "{:.4f}",
-                            "Cur. Price": "${:.2f}",
-                            "Liq. Price": "${:.2f}",
-                            "Net USD Value": "${:.2f}",
-                        }
-                    ),
-                    use_container_width=True,
+                net_value = val / QUOTE_PRECISION
+
+                spot_data.append(
+                    {
+                        "Name": get_market_name(market),
+                        "Balance": balance,
+                        "Price ($)": oracle_price,
+                        "Net Value ($)": net_value,
+                        "Liquidation Price ($)": liq_price,
+                    }
                 )
-            else:
-                st.write("No active spot positions.")
 
-            st.markdown("### Perp Positions")
-            perp_positions = []
-            for perp_pos in user.get_active_perp_positions():
-                if not perp_pos:
-                    continue
+        perp_data = []
+        for pos in perp_positions:
+            market = user.get_perp_market_account(pos.market_index)
+            oracle_price_data = user.get_oracle_data_for_perp_market(pos.market_index)
 
-                market_idx = perp_pos.market_index
-                perp_market = user.get_perp_market_account(market_idx)
-                market_name = "".join(map(chr, perp_market.name)).strip()
-                liq_price = user.get_perp_liq_price(market_idx)
-                if not liq_price:
-                    continue
+            if oracle_price_data:
+                oracle_price = float(oracle_price_data.price) / QUOTE_PRECISION
+                base_size = pos.base_asset_amount / 1e9
+                notional = base_size * oracle_price
+                liq_price = (
+                    float(user.get_perp_liq_price(pos.market_index)) / QUOTE_PRECISION
+                )
 
-                position = {
-                    "Authority": f"{user_authority}-0",
-                    "Market": market_name,
-                    "Base (1e9)": perp_pos.base_asset_amount / 1e9,
-                    "Liq. Price": liq_price / 1e6,
-                }
-                perp_positions.append(position)
+                perp_data.append(
+                    {
+                        "Name": get_market_name(market),
+                        "Base Size": base_size,
+                        "Price ($)": oracle_price,
+                        "Notional ($)": notional,
+                        "Liquidation Price ($)": liq_price,
+                    }
+                )
 
-            if perp_positions:
-                perp_df = pd.DataFrame(perp_positions)
-                st.dataframe(perp_df, use_container_width=True)
-            else:
-                st.write("No active perp positions.")
+    st.subheader("Position Analysis")
+    result_cols = st.columns([1, 1])
 
-            st.success("Calculation complete!")
+    with result_cols[0]:
+        if spot_data:
+            st.markdown("#### Spot Positions")
+            spot_df = pd.DataFrame(spot_data)
 
-        finally:
-            drift_client.account_subscriber.cache = original_cache
+            total_assets = sum([v for v in spot_df["Net Value ($)"] if v > 0])
+            total_liabilities = sum([abs(v) for v in spot_df["Net Value ($)"] if v < 0])
 
-    else:
-        st.info("Adjust parameters and click 'Submit' to see liquidation calculations.")
+            metrics_cols = st.columns(2)
+            metrics_cols[0].metric("Total Assets", f"${total_assets:,.2f}")
+            metrics_cols[1].metric("Total Liabilities", f"${total_liabilities:,.2f}")
+
+            st.dataframe(
+                spot_df,
+                column_config={
+                    "Name": st.column_config.TextColumn("Market"),
+                    "Balance": st.column_config.NumberColumn(
+                        format=f"%.{max_spot_decimals}f"
+                    ),
+                    "Price ($)": st.column_config.NumberColumn(
+                        "Price ($)", format="$%.2f"
+                    ),
+                    "Net Value ($)": st.column_config.NumberColumn(
+                        "Net Value ($)", format="$%.2f"
+                    ),
+                    "Liquidation Price ($)": st.column_config.NumberColumn(
+                        "Liq. Price ($)", format="$%.2f"
+                    ),
+                },
+                use_container_width=True,
+            )
+        else:
+            st.info("No spot positions to display")
+
+    with result_cols[1]:
+        if perp_data:
+            st.markdown("#### Perp Positions")
+            perp_df = pd.DataFrame(perp_data)
+
+            total_long_notional = sum([v for v in perp_df["Notional ($)"] if v > 0])
+            total_short_notional = sum(
+                [abs(v) for v in perp_df["Notional ($)"] if v < 0]
+            )
+
+            metrics_cols = st.columns(2)
+            metrics_cols[0].metric("Total Long", f"${total_long_notional:,.2f}")
+            metrics_cols[1].metric("Total Short", f"${total_short_notional:,.2f}")
+
+            st.dataframe(
+                perp_df,
+                column_config={
+                    "Name": st.column_config.TextColumn("Market"),
+                    "Base Size": st.column_config.NumberColumn(format="%.9f"),
+                    "Price ($)": st.column_config.NumberColumn(
+                        "Price ($)", format="$%.2f"
+                    ),
+                    "Notional ($)": st.column_config.NumberColumn(
+                        "Notional ($)", format="$%.2f"
+                    ),
+                    "Liquidation Price ($)": st.column_config.NumberColumn(
+                        "Liq. Price ($)", format="$%.2f"
+                    ),
+                },
+                use_container_width=True,
+            )
+        else:
+            st.info("No perp positions to display")
+
+    health = user.get_health()
+    health_color = "normal"
+    if health < 20:
+        health_color = "off"
+    elif health < 50:
+        health_color = "error"
+
+    st.metric("Account Health", f"{health:.2f}%", delta_color=health_color)
