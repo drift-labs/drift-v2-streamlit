@@ -14,6 +14,7 @@ from driftpy.addresses import get_user_account_public_key
 from driftpy.drift_client import DriftClient
 from driftpy.drift_user import DriftUser
 from driftpy.math.spot_balance import StrictOraclePrice
+from driftpy.oracles.oracle_id import get_oracle_id
 from solders.pubkey import Pubkey
 
 logging.basicConfig(level=logging.INFO)
@@ -217,11 +218,12 @@ async def liqcalc(drift_client: DriftClient):
             if not cfg:
                 st.error(f"Market {mkt_name} not found")
                 return
-            oracle_key = str(cfg.oracle)
+            oracle_key = get_oracle_id(cfg.oracle, cfg.oracle_source)
             if oracle_key in oracle_data:
-                old_price = oracle_data[oracle_key].price
+                print("Hit")
+                old_price = oracle_data[oracle_key].data.price
                 new_price = old_price * (1 + pct_change / 100.0)
-                oracle_data[oracle_key].price = new_price
+                oracle_data[oracle_key].data.price = new_price
                 logger.info(
                     f"Applied {pct_change}% change to {mkt_name}, "
                     f"price: {old_price} -> {new_price}"
