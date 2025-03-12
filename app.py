@@ -11,16 +11,15 @@ from driftpy.drift_client import AccountSubscriptionConfig, DriftClient
 from solana.rpc.async_api import AsyncClient
 from solders.keypair import Keypair
 
-# from network import show_network
 from tabs.api import show_api
 from tabs.competition import competitions
-from tabs.condliq import condliqcheck
 from tabs.fee_income import fee_income_page
 from tabs.fees import fee_page
 from tabs.funding_history import funding_history
 from tabs.gpt import gpt_page
 from tabs.if_stakers import insurance_fund_page
 from tabs.imf import imf_page
+from tabs.liqcalc import liqcalc
 from tabs.liquidity import mm_page
 from tabs.logs import log_page
 from tabs.mm_program import mm_program_page
@@ -55,6 +54,7 @@ load_dotenv()
 try:
     from tabs.backtester import backtester_page
 except ImportError:
+    print("backtester not found")
     pass
 
 
@@ -110,7 +110,6 @@ def main():
         "vAMM",
         "FundingHistory",
         "UserDataRaw",
-        "ConditionalLiquidity",
         "Vaults",
         "DriftDraw",
         "Openbookv2",
@@ -118,6 +117,7 @@ def main():
         "UsersInMarket",
         "Backtester",
         "MM (legacy)",
+        "Liquidation Calculator",
         #   'Social', 'PlatyPerps'
     )
     query_index = 0
@@ -172,10 +172,6 @@ def main():
             )
             + " days",
         )
-        import driftpy
-
-        st.write(driftpy.__version__)
-
         st.markdown(
             """
         On this site, did you know you can...
@@ -278,9 +274,6 @@ def main():
     elif tab.lower() == "vamm":
         loop = asyncio.new_event_loop()
         loop.run_until_complete(vamm(clearing_house))
-    elif tab.lower() == "conditionalliquidity":
-        loop = asyncio.new_event_loop()
-        loop.run_until_complete(condliqcheck(clearing_house))
     # elif tab.lower() == 'network':
     #     loop = asyncio.new_event_loop()
     #     loop.run_until_complete(show_network(clearing_house))
@@ -328,11 +321,12 @@ def main():
     elif tab.lower() == "userdataraw":
         loop = asyncio.new_event_loop()
         loop.run_until_complete(userdataraw(clearing_house))
-
+    elif tab.lower() == "liquidation calculator":
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(liqcalc(clearing_house))
     elif tab.lower() == "fundinghistory":
         loop = asyncio.new_event_loop()
         loop.run_until_complete(funding_history(clearing_house, env))
-
     elif tab.lower() == "vaults":
         loop = asyncio.new_event_loop()
         loop.run_until_complete(vaults(clearing_house, env))
@@ -352,7 +346,8 @@ def main():
     elif tab.lower() == "backtester":
         try:
             backtester_page(clearing_house, env)
-        except:
+        except ImportError:
+            print("backtester not found")
             pass
     hide_streamlit_style = """
             <style>
@@ -366,7 +361,8 @@ def main():
 if __name__ == "__main__":
     try:
         st.set_page_config("Drift v2", layout="wide", page_icon="👾")
-    except:
+    except Exception as e:
+        print(e)
         pass
 
     main()
