@@ -74,7 +74,6 @@ async def is_subaccount(pubkey: Pubkey, drift_client: DriftClient):
 
 async def liqcalc(drift_client: DriftClient):
     """Main liquidation calculator function."""
-    st.title("Drift Liquidation Calculator")
 
     if "clearing_house_cache" not in st.session_state:
         st.session_state.clearing_house_cache = None
