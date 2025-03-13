@@ -1,17 +1,13 @@
-import sys
-
-import driftpy
-import numpy as np
-import pandas as pd
-import plotly.express as px
-
-pd.options.plotting.backend = "plotly"
 import asyncio
 import json
 import os
+import sys
 from dataclasses import dataclass
 
+import driftpy
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 import plotly.express as px
 import streamlit as st
 
@@ -28,7 +24,7 @@ from driftpy.addresses import get_user_account_public_key
 from driftpy.constants.numeric_constants import *
 from driftpy.constants.perp_markets import PerpMarketConfig, devnet_perp_market_configs
 from driftpy.constants.spot_markets import SpotMarketConfig, devnet_spot_market_configs
-from driftpy.drift_client import DriftClient
+from driftpy.drift_client import AccountSubscriptionConfig, DriftClient
 from driftpy.drift_user import DriftUser as DriftUser
 from driftpy.drift_user import get_token_amount
 from driftpy.math.margin import MarginCategory
@@ -42,10 +38,10 @@ from solders.pubkey import Pubkey
 from datafetch.transaction_fetch import load_token_balance
 from helpers import serialize_perp_market_2, serialize_spot_market
 
+pd.options.plotting.backend = "plotly"
+
 MARGIN_PRECISION = 1e4
 PERCENTAGE_PRECISION = 10**6
-
-from driftpy.drift_client import AccountSubscriptionConfig
 
 
 async def show_pid_positions(clearing_house: DriftClient):
