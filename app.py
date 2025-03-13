@@ -91,10 +91,6 @@ def main():
         "Fee-Schedule",
         "Insurance-Fund",
         "Perp-LPs",
-        "User-Activity",
-        "User-Performance",
-        "User-Health",
-        "User-Volume",
         "User-Stats",
         "DLOB",
         "Refs",
@@ -118,8 +114,15 @@ def main():
         "Backtester",
         "MM (legacy)",
         "Liquidation Calculator",
-        #   'Social', 'PlatyPerps'
     )
+
+    to_remove = [
+        "User-Activity",
+        "User-Performance",
+        "User-Health",
+        "User-Volume",
+    ]
+
     query_index = 0
     for idx, x in enumerate(tab_options):
         if x.lower() == query_tab.lower():
@@ -202,7 +205,7 @@ def main():
         loop = asyncio.new_event_loop()
         loop.run_until_complete(show_overview_markets(clearing_house))
 
-    elif tab.lower() == "overview":
+    elif tab.lower() == "overview-users":
         loop = asyncio.new_event_loop()
         loop.run_until_complete(show_pid_positions(clearing_house))
 
@@ -241,15 +244,6 @@ def main():
     elif tab.lower() == "insurance-fund":
         loop = asyncio.new_event_loop()
         loop.run_until_complete(insurance_fund_page(clearing_house, env))
-    elif tab.lower() == "user-performance":
-        loop = asyncio.new_event_loop()
-        loop.run_until_complete(show_user_perf(clearing_house))
-    elif tab.lower() == "user-activity":
-        loop = asyncio.new_event_loop()
-        loop.run_until_complete(show_user_activity(clearing_house))
-    elif tab.lower() == "user-health":
-        loop = asyncio.new_event_loop()
-        loop.run_until_complete(show_user_health(clearing_house))
 
     elif tab.lower() == "user-status":
         loop = asyncio.new_event_loop()
@@ -274,10 +268,6 @@ def main():
     elif tab.lower() == "vamm":
         loop = asyncio.new_event_loop()
         loop.run_until_complete(vamm(clearing_house))
-    # elif tab.lower() == 'network':
-    #     loop = asyncio.new_event_loop()
-    #     loop.run_until_complete(show_network(clearing_house))
-
     elif tab.lower() == "mm":
         loop = asyncio.new_event_loop()
         loop.run_until_complete(mm_program_page(clearing_house, env))
@@ -286,7 +276,6 @@ def main():
         loop.run_until_complete(mm_page(clearing_house))
     elif tab.lower() == "trade flow":
         trade_flow_analysis()
-
     elif tab.lower() == "imf":
         loop = asyncio.new_event_loop()
         loop.run_until_complete(imf_page(clearing_house))
