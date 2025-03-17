@@ -572,6 +572,6 @@ async def liqcalc(drift_client: DriftClient):
     if health < 20:
         health_color = "off"
     elif health < 50:
-        health_color = "error"
+        health_color = "inverse"
 
     st.metric("Account Health", f"{health:.2f}%", delta_color=health_color)
