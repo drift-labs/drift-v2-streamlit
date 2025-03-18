@@ -275,7 +275,8 @@ def main():
         loop = asyncio.new_event_loop()
         loop.run_until_complete(mm_page(clearing_house))
     elif tab.lower() == "trade flow":
-        trade_flow_analysis()
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(trade_flow_analysis(clearing_house))
     elif tab.lower() == "imf":
         loop = asyncio.new_event_loop()
         loop.run_until_complete(imf_page(clearing_house))
