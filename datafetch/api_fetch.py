@@ -4,16 +4,17 @@ Fetch trades from the API
 The API is documented at https://data.api.drift.trade/playground/
 """
 
-from datetime import timedelta
 import time
+from datetime import timedelta
 
 import pandas as pd
 import requests
-
+from streamlit import cache_data
 
 URL_PREFIX = "https://data.api.drift.trade"
 
 
+@cache_data(ttl=60 * 60 * 24)
 def get_trades_for_range_pandas(market_symbol, start_date, end_date, page=1):
     print(f"Fetching trades for {market_symbol} from {start_date} to {end_date}")
     df = pd.DataFrame()
