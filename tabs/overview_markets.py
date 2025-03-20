@@ -409,3 +409,82 @@ async def show_overview_markets(clearing_house: DriftClient):
                     legend_title="Curves",
                 )
                 st.plotly_chart(ir_fig, key=f"ir_fig-{market_index}")
+
+                st.markdown("## Simulate New Interest Rate Curve")
+
+                new_input_cols = st.columns(3)
+                with new_input_cols[0]:
+                    new_opt_util = st.number_input("New Optimal Utilization",
+                        value=float(opt_util),
+                        min_value=0.0,
+                        max_value=100.0,
+                        key=f"opt_util_{market_index}")
+                with new_input_cols[1]:
+                    new_opt_borrow = st.number_input("New Optimal Borrow Rate",
+                        value=float(opt_borrow),
+                        min_value=0.0,
+                        max_value=100.0,
+                        key=f"opt_borrow_{market_index}")
+                with new_input_cols[2]:
+                    new_max_borrow = st.number_input("New Max Borrow Rate",
+                        value=float(max_borrow),
+                        min_value=0.0,
+                        max_value=100.0,
+                        key=f"max_borrow_{market_index}")
+
+                # Display comparison
+                st.markdown("### Current vs New Parameters")
+                comp_cols = st.columns(3)
+                with comp_cols[0]:
+                    st.metric(f"Optimal Utilization", f"{opt_util:.2f}% -> {new_opt_util:.2f}%", f"{new_opt_util - opt_util:.2f}%")
+                with comp_cols[1]:
+                    st.metric(f"Optimal Borrow Rate", f"{opt_borrow:.2f}% -> {new_opt_borrow:.2f}%", f"{new_opt_borrow - opt_borrow:.2f}%")
+                with comp_cols[2]:
+                    st.metric(f"Max Borrow Rate", f"{max_borrow:.2f}% -> {new_max_borrow:.2f}%", f"{new_max_borrow - max_borrow:.2f}%")
+
+                # Calculate new interest rate curves
+                new_bor_ir_curve = [
+                    new_opt_borrow * (100 / new_opt_util) * x / 100
+                    if x <= new_opt_util
+                    else ((new_max_borrow - new_opt_borrow) * (100 / (100 - new_opt_util)))
+                    * (x - new_opt_util)
+                    / 100
+                    + new_opt_borrow
+                    for x in ir_curve_index
+                ]
+
+                new_dep_ir_curve = [
+                    ir
+                    * ir_curve_index[idx]
+                    * (1 - market.insurance_fund.total_factor / 1e6)
+                    / 100
+                    for idx, ir in enumerate(new_bor_ir_curve)
+                ]
+
+                # Create new figure with both current and new curves
+                sim_ir_fig = (
+                    pd.DataFrame(
+                        [dep_ir_curve, bor_ir_curve, new_dep_ir_curve, new_bor_ir_curve],
+                        index=["current deposit", "current borrow", "new deposit", "new borrow"],
+                        columns=ir_curve_index,
+                    ).T
+                    * 100
+                ).plot()
+
+                sim_ir_fig.add_vline(
+                    x=market.utilization_twap / 1e6 * 100,
+                    line_color="blue",
+                    annotation_text="util_twap",
+                )
+                sim_ir_fig.add_vline(
+                    x=utilization * 100, line_color="green", annotation_text="util"
+                )
+
+                sim_ir_fig.update_layout(
+                    title=market_name + " Interest Rate Simulation",
+                    xaxis_title="utilization (%)",
+                    yaxis_title="interest rate (%)",
+                    legend_title="Curves",
+                )
+                st.plotly_chart(sim_ir_fig, key=f"sim_ir_fig-{market_index}")
+
