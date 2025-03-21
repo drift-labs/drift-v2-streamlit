@@ -100,17 +100,16 @@ def process_trades_df(raw_trades_df: pd.DataFrame) -> pd.DataFrame:
 			future_df[['ts', 'oraclePrice']],
 			on='ts',
 			direction='forward',
-			# tolerance=pd.Timedelta(seconds=1),  # Allow 1 second tolerance for matching
-			# allow_exact_matches=True,
+			allow_exact_matches=True,
 			suffixes=('', '_future')
 		)
 
 		filtered[f'oraclePrice_{period}'] = merged_df['oraclePrice_future']
 
 		# Calculate markout premium
-		filtered[f'makerPremium{period}'] = (filtered['fillPrice'] - merged_df['oraclePrice_future']) * (2 * (filtered['makerOrderDirection'] == 'long') - 1)
+		filtered[f'makerPremium{period}'] = (filtered['fillPrice'] - filtered[f'oraclePrice_{period}']) * filtered['makerOrderDirectionNum'] * -1
 		filtered[f'makerPremium{period}Dollar'] = filtered[f'makerPremium{period}'] * filtered['baseAssetAmountFilled']
-		filtered[f'takerPremium{period}'] = (filtered['fillPrice'] - merged_df['oraclePrice_future']) * (2 * (filtered['takerOrderDirection'] == 'long') - 1)
+		filtered[f'takerPremium{period}'] = (filtered['fillPrice'] - filtered[f'oraclePrice_{period}']) * filtered['takerOrderDirectionNum'] * -1
 		filtered[f'takerPremium{period}Dollar'] = filtered[f'takerPremium{period}'] * filtered['baseAssetAmountFilled']
 
 	# Convert timestamp to datetime in UTC timezone
@@ -260,12 +259,24 @@ def render_trades_stats_for_user_account(processed_trades_df, filter_ua):
 
 
 def plot_cumulative_pnl_for_user_account(user_trades_df, filter_ua):
-	# Create a single figure with 4 subplots sharing x-axis
-	fig = make_subplots(rows=4, cols=1, shared_xaxes=True,
+	# First figure with time series
+	fig1 = make_subplots(rows=4, cols=1, shared_xaxes=True,
 		subplot_titles=('Trade Analysis', 'Cumulative Base Asset', 'Cumulative PnL', 'Markout Analysis'),
 		vertical_spacing=0.05,
-		row_heights=[0.3, 0.2, 0.2, 0.3],
-		specs=[[{"secondary_y": True}], [{}], [{}], [{}]])
+		row_heights=[1, 1, 1, 1],
+		specs=[
+			[{"secondary_y": True}],
+			[{}],
+			[{}],
+			[{}]
+		]
+	)
+
+	fig1.update_layout(
+		height=1500,
+		showlegend=True,
+		# legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+	)
 
 	# Add scatter plot for trades with color based on direction
 	long_trades = user_trades_df[user_trades_df['user_direction'] == 'long']
@@ -275,7 +286,7 @@ def plot_cumulative_pnl_for_user_account(user_trades_df, filter_ua):
 	opacity = 0.75
 
 	# Add trade visualization traces to first subplot
-	fig.add_trace(
+	fig1.add_trace(
 		go.Scatter(x=long_trades.index, y=long_trades['fillPrice'],
 			mode='markers+lines', name='Long Trades',
 			marker=dict(size=trade_marker_size, opacity=opacity, color='#00AA3F'),
@@ -287,7 +298,7 @@ def plot_cumulative_pnl_for_user_account(user_trades_df, filter_ua):
 		row=1, col=1, secondary_y=False
 	)
 
-	fig.add_trace(
+	fig1.add_trace(
 		go.Scatter(x=short_trades.index, y=short_trades['fillPrice'],
 			mode='markers+lines', name='Short Trades',
 			marker=dict(size=trade_marker_size, opacity=opacity, color='#CC0000'),
@@ -299,7 +310,7 @@ def plot_cumulative_pnl_for_user_account(user_trades_df, filter_ua):
 		row=1, col=1, secondary_y=False
 	)
 
-	fig.add_trace(
+	fig1.add_trace(
 		go.Scatter(x=user_trades_df.index, y=user_trades_df['oraclePrice'],
 			mode='markers', name='Oracle',
 			marker=dict(size=trade_marker_size, opacity=opacity, color='#00BFFF'),
@@ -311,7 +322,7 @@ def plot_cumulative_pnl_for_user_account(user_trades_df, filter_ua):
 	)
 
 	# Add average price curve
-	fig.add_trace(
+	fig1.add_trace(
 		go.Bar(x=long_trades.index, y=abs(long_trades['user_base']),
 			name='Long Trade Size',
 			marker=dict(color='#00FF7F', opacity=0.5),
@@ -319,7 +330,7 @@ def plot_cumulative_pnl_for_user_account(user_trades_df, filter_ua):
 		row=1, col=1, secondary_y=True
 	)
 
-	fig.add_trace(
+	fig1.add_trace(
 		go.Bar(x=short_trades.index, y=abs(short_trades['user_base']),
 			name='Short Trade Size',
 			marker=dict(color='#FF6B6B', opacity=0.5),
@@ -330,7 +341,7 @@ def plot_cumulative_pnl_for_user_account(user_trades_df, filter_ua):
 	marker_size = 3
 
 	# Add cumulative base asset trace to second subplot
-	fig.add_trace(
+	fig1.add_trace(
 		go.Scatter(x=user_trades_df.index, y=user_trades_df['user_cum_base'],
 			mode='lines+markers', name='Cumulative Base',
 			line=dict(width=1), marker=dict(size=marker_size)),
@@ -338,7 +349,7 @@ def plot_cumulative_pnl_for_user_account(user_trades_df, filter_ua):
 	)
 
 	# Add PnL traces to third subplot
-	fig.add_trace(
+	fig1.add_trace(
 		go.Scatter(x=user_trades_df.index, y=user_trades_df['user_cum_fee'],
 			mode='lines+markers', name='Cumulative Fee Received',
 			line=dict(width=1), marker=dict(size=marker_size),
@@ -346,7 +357,7 @@ def plot_cumulative_pnl_for_user_account(user_trades_df, filter_ua):
 		row=3, col=1
 	)
 
-	fig.add_trace(
+	fig1.add_trace(
 		go.Scatter(x=user_trades_df.index, y=user_trades_df['user_cum_pnl'],
 			mode='lines+markers', name='Cumulative PnL',
 			line=dict(width=1), marker=dict(size=marker_size),
@@ -354,7 +365,7 @@ def plot_cumulative_pnl_for_user_account(user_trades_df, filter_ua):
 		row=3, col=1
 	)
 
-	fig.add_trace(
+	fig1.add_trace(
 		go.Scatter(x=user_trades_df.index, y=user_trades_df['user_cum_pnl'] - user_trades_df['user_cum_fee'],
 			mode='lines+markers', name='Cumulative PnL + Fee',
 			line=dict(width=1), marker=dict(size=marker_size)),
@@ -364,7 +375,7 @@ def plot_cumulative_pnl_for_user_account(user_trades_df, filter_ua):
 	# Add markout traces to fourth subplot
 	colors = ['#FF0000', '#00FF00', '#0000FF', '#FFA500', '#800080']
 	for i, period in enumerate(markout_periods):
-		fig.add_trace(
+		fig1.add_trace(
 			go.Scatter(x=user_trades_df.index,
 					  y=user_trades_df[f'userPremium{period}Dollar'].cumsum(),
 					  mode='lines+markers',
@@ -374,26 +385,201 @@ def plot_cumulative_pnl_for_user_account(user_trades_df, filter_ua):
 			row=4, col=1
 		)
 
-	# Update layout
-	fig.update_layout(
-		# title_text=f'Account Analysis ({filter_ua})',
-		height=1500,
-		width=1200,
-		showlegend=True,
-		legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-		hovermode='closest',  # Show nearest data on hover
-		hoverdistance=10      # Increase hover distance to detect points
+	# Second figure for histograms
+	fig2 = make_subplots(rows=1, cols=len(markout_periods),
+		subplot_titles=[f'Markout {period}' for period in markout_periods],
+		horizontal_spacing=0.05
 	)
 
-	# Update axes labels
-	fig.update_xaxes(title_text="Time (UTC)", row=4, col=1)
-	fig.update_yaxes(title_text="Price", row=1, col=1, secondary_y=False)
-	fig.update_yaxes(title_text="Trade Size", row=1, col=1, secondary_y=True)
-	fig.update_yaxes(title_text="Base Amount", row=2, col=1)
-	fig.update_yaxes(title_text="PnL", row=3, col=1)
-	fig.update_yaxes(title_text="Markout PnL", row=4, col=1)
+	colors = ['#FF0000', '#00FF00', '#0000FF', '#FFA500', '#800080']
 
-	st.plotly_chart(fig, use_container_width=True)
+	for i, period in enumerate(markout_periods):
+		# Add histogram
+		fig2.add_trace(
+			go.Histogram(
+				x=user_trades_df[f'userPremium{period}'],
+				name=f'Markout {period}',
+				nbinsx=100,
+				# histnorm='probability',
+				# histnorm='probability density',
+				marker_color=colors[i],
+				opacity=0.5,
+				showlegend=False
+			),
+			row=1, col=i+1
+		)
+
+		# Add vertical line at x=0
+		fig2.add_vline(x=0, line_dash="dash", line_color="black", row=1, col=i+1)
+
+		# Calculate metrics
+		mean_val = user_trades_df[f'userPremium{period}'].mean()
+		std_val = user_trades_df[f'userPremium{period}'].std()
+		median_val = user_trades_df[f'userPremium{period}'].median()
+		skew_val = user_trades_df[f'userPremium{period}'].skew()
+
+		# Get histogram data to find max y value
+		hist, bins = np.histogram(user_trades_df[f'userPremium{period}'], bins=100, density=False)
+		max_y = np.max(hist)
+		max_x = np.max(bins)
+
+		# Add metrics as annotations in top right
+		fig2.add_annotation(
+			text=f"Mean: {mean_val:.4f}<br>Std: {std_val:.4f}<br>Median: {median_val:.4f}<br>Skew: {skew_val:.4f}",
+			xref=f"x{i+1}",
+			yref=f"y{i+1}",
+			x=max_x,
+			y=max_y,
+			showarrow=False,
+			align="right",
+			row=1,
+			col=i+1
+		)
+
+	fig2.update_layout(
+		title="Markout Distributions",
+		height=400,
+		showlegend=False,
+		xaxis_title="Premium",
+		yaxis_title="Frequency",
+		plot_bgcolor='white',  # Light mode background
+		paper_bgcolor='white'
+	)
+
+	# Update all x and y axes to have consistent ranges
+	for i in range(1, len(markout_periods) + 1):
+		fig2.update_xaxes(title_text="Premium", row=1, col=i)
+		fig2.update_yaxes(title_text="Frequency", row=1, col=i)
+		# Set light mode grid
+		fig2.update_xaxes(showgrid=True, gridwidth=1, gridcolor='LightGrey', row=1, col=i)
+		fig2.update_yaxes(showgrid=True, gridwidth=1, gridcolor='LightGrey', row=1, col=i)
+
+	# Display both figures
+	st.plotly_chart(fig1, use_container_width=True)
+	st.plotly_chart(fig2, use_container_width=True)
+
+	# Display metrics in columns below the plot
+	with st.expander("Markout Statistics"):
+		# Create a dataframe with markout statistics
+		markout_stats = pd.DataFrame()
+		for period in markout_periods:
+			markout_stats[period] = [
+				user_trades_df[f'userPremium{period}'].mean(),
+				user_trades_df[f'userPremium{period}'].std(),
+				user_trades_df[f'userPremium{period}'].median(),
+				user_trades_df[f'userPremium{period}'].skew()
+			]
+
+		markout_stats.index = ['Mean', 'Std', 'Median', 'Skew']
+		markout_stats = markout_stats.round(4)
+
+		st.dataframe(markout_stats)
+
+	# Add counterparty analysis expander
+	with st.expander("Counterparty Analysis"):
+		# Calculate fill volumes by counterparty
+		counterparty_volumes = user_trades_df.groupby('counterparty')['user_quote'].apply(lambda x: abs(x).sum()).reset_index()
+		counterparty_volumes.columns = ['Counterparty', 'Fill Volume']
+
+		# Calculate total volume and percentages
+		total_volume = counterparty_volumes['Fill Volume'].sum()
+		counterparty_volumes['Percentage'] = (counterparty_volumes['Fill Volume'] / total_volume * 100).round(2)
+
+		# Sort by volume
+		counterparty_volumes = counterparty_volumes.sort_values('Fill Volume', ascending=False)
+
+		# Add total row
+		total_row = pd.DataFrame({
+			'Counterparty': ['TOTAL'],
+			'Fill Volume': [total_volume],
+			'Percentage': [100.00]
+		})
+		counterparty_volumes = pd.concat([counterparty_volumes, total_row], ignore_index=True)
+
+		# Format numbers
+		counterparty_volumes['Fill Volume'] = counterparty_volumes['Fill Volume'].round(2)
+
+		# Display the table
+		st.dataframe(counterparty_volumes)
+
+		# Add pie chart for counterparty distribution
+		fig_counterparty = go.Figure(data=[go.Pie(
+			labels=counterparty_volumes['Counterparty'].iloc[:-1],  # Exclude total row
+			values=counterparty_volumes['Fill Volume'].iloc[:-1],
+			hole=.3
+		)])
+		fig_counterparty.update_layout(
+			title="Distribution of Fill Volumes by Counterparty",
+			height=400,
+			showlegend=True
+		)
+		st.plotly_chart(fig_counterparty, use_container_width=True)
+
+		# Add fill methods breakdown by counterparty
+		st.write("### Fill Methods by Counterparty")
+
+		# Calculate fill methods by counterparty
+		fill_methods = user_trades_df.groupby(['counterparty', 'spotFulfillmentMethodFee'])['user_quote'].apply(lambda x: abs(x).sum()).reset_index()
+		fill_methods.columns = ['Counterparty', 'Fill Method', 'Volume']
+
+		# Calculate percentages within each counterparty
+		total_by_counterparty = fill_methods.groupby('Counterparty')['Volume'].transform('sum')
+		fill_methods['Percentage'] = (fill_methods['Volume'] / total_by_counterparty * 100).round(2)
+
+		# Sort by volume within each counterparty
+		fill_methods = fill_methods.sort_values(['Counterparty', 'Volume'], ascending=[True, False])
+
+		# Create pivot table for volumes
+		volume_pivot = fill_methods.pivot(index='Counterparty', columns='Fill Method', values='Volume').fillna(0)
+
+		# Create pivot table for percentages
+		pct_pivot = fill_methods.pivot(index='Counterparty', columns='Fill Method', values='Percentage').fillna(0)
+
+		# Combine the two pivots
+		combined_pivot = pd.DataFrame()
+		for method in volume_pivot.columns:
+			combined_pivot[f"{method} (Volume)"] = volume_pivot[method].round(2)
+			combined_pivot[f"{method} (%)"] = pct_pivot[method].round(2)
+
+		# Add total volume column
+		combined_pivot['Total Volume'] = volume_pivot.sum(axis=1).round(2)
+
+		# Sort by total volume
+		combined_pivot = combined_pivot.sort_values('Total Volume', ascending=False)
+
+		# Add total row
+		total_row = pd.Series({
+			'Total Volume': combined_pivot['Total Volume'].sum()
+		})
+		for method in volume_pivot.columns:
+			total_row[f"{method} (Volume)"] = volume_pivot[method].sum()
+			total_row[f"{method} (%)"] = 100.0 if volume_pivot[method].sum() > 0 else 0.0
+
+		combined_pivot.loc['TOTAL'] = total_row
+
+		st.dataframe(combined_pivot)
+
+		# Add stacked bar chart for fill methods
+		fig_methods = go.Figure()
+
+		# Get unique fill methods
+		methods = fill_methods['Fill Method'].unique()
+
+		for method in methods:
+			method_data = fill_methods[fill_methods['Fill Method'] == method]
+			fig_methods.add_trace(go.Bar(
+				name=method,
+				x=method_data['Counterparty'],
+				y=method_data['Volume']
+			))
+
+		fig_methods.update_layout(
+			title="Fill Methods Distribution by Counterparty",
+			barmode='stack',
+			height=400,
+			showlegend=True
+		)
+		st.plotly_chart(fig_methods, use_container_width=True)
 
 
 async def post_trade_analysis(clearinghouse: DriftClient):
@@ -437,6 +623,41 @@ async def post_trade_analysis(clearinghouse: DriftClient):
 		for filtered_ua in filtered_uas:
 			st.write(f"# User Account: {filtered_ua}")
 			users_trades = render_trades_stats_for_user_account(processed_trades_df, filtered_ua)
+
+			# Create columns for filter and distribution
+			filter_col, dist_col, action_col= st.columns([1, 1, 1])
+
+			with filter_col:
+				# Add actionExplanation filter
+				action_explanations = users_trades['actionExplanation'].unique()
+				selected_action = st.radio("Filter by Action", ['All'] + list(action_explanations), key=f"action_{filtered_ua}")
+				if selected_action != 'All':
+					users_trades = users_trades[users_trades['actionExplanation'] == selected_action]
+
+			# Calculate distribution of quote values by action
+			action_quotes = users_trades.groupby('actionExplanation')['user_quote'].apply(lambda x: abs(x).sum()).reset_index()
+			action_quotes.columns = ['Action', 'Total Quote Value']
+			action_quotes['Total Quote %'] = action_quotes['Total Quote Value'] / action_quotes['Total Quote Value'].sum() * 100
+
+			with dist_col:
+
+				# Create pie chart
+				fig_pie = go.Figure(data=[go.Pie(
+					labels=action_quotes['Action'],
+					values=action_quotes['Total Quote Value'],
+					hole=.3
+				)])
+				fig_pie.update_layout(
+					title="Distribution of Fill Volumeby Action",
+					height=300,
+					showlegend=True
+				)
+				st.plotly_chart(fig_pie, use_container_width=True)
+
+			with action_col:
+				# Show the data in a table below the pie chart
+				st.dataframe(action_quotes)
+
 			plot_cumulative_pnl_for_user_account(users_trades, filtered_ua)
 
 		with st.expander("Show raw data"):
