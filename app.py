@@ -41,6 +41,7 @@ from tabs.users_in_market import users_in_market_page
 from tabs.userstats import show_user_stats
 from tabs.userstatus import userstatus_page
 from tabs.uservolume import show_user_volume
+from tabs.post_trade_analysis import post_trade_analysis
 from tabs.vamm import vamm
 from tabs.vaults import vaults
 
@@ -96,6 +97,7 @@ def main():
         "Refs",
         "MM",
         "Trade Flow",
+        "Post Trade Analysis",
         "Drift-GPT",
         "IMF",
         "Network",
@@ -277,6 +279,9 @@ def main():
     elif tab.lower() == "trade flow":
         loop = asyncio.new_event_loop()
         loop.run_until_complete(trade_flow_analysis(clearing_house))
+    elif tab.lower() == "post trade analysis":
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(post_trade_analysis(clearing_house))
     elif tab.lower() == "imf":
         loop = asyncio.new_event_loop()
         loop.run_until_complete(imf_page(clearing_house))

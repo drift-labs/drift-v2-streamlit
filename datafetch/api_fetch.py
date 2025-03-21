@@ -56,3 +56,54 @@ def get_trades_for_range_pandas(market_symbol, start_date, end_date, page=1):
 
     df["ts"] = pd.to_datetime(df["ts"], unit="s")
     return df
+
+
+@cache_data(ttl=60 * 60 * 24)
+def get_trades_for_day(market_symbol, year, month, day, page=1):
+    """
+    Fetch trades for a specific market and date from the Drift API.
+
+    Args:
+        market_symbol (str): The market symbol (e.g., 'SOL-PERP')
+        year (int): Year of the data
+        month (int): Month of the data
+        day (int): Day of the data
+        page (int, optional): Starting page number. Defaults to 1.
+
+    Returns:
+        pd.DataFrame: DataFrame containing trade data
+    """
+    url = f"{URL_PREFIX}/market/{market_symbol}/trades/{year}/{month:02d}/{day:02d}"
+    print(f"Fetching trades from: {url}")
+
+    try:
+        all_data = []
+        current_page = page
+
+        while True:
+            print(f"Fetching page {current_page}")
+            response = requests.get(url, params={"page": current_page})
+            response.raise_for_status()
+            json_data = response.json()
+            meta = json_data["meta"]
+            all_data.extend(json_data["records"])
+
+            if meta["nextPage"] is None or current_page >= meta["totalPages"]:
+                break
+
+            current_page = meta["nextPage"]
+            time.sleep(0.1)  # Be nice to the API
+
+        df = pd.DataFrame(all_data)
+        if not df.empty:
+            df["ts"] = pd.to_datetime(df["ts"], unit="s")
+
+        print(f"Retrieved {len(all_data)} records out of {meta.get('totalRecords', 'unknown')} total")
+        return df
+
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching data: {e}")
+        return pd.DataFrame()
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+        return pd.DataFrame()
