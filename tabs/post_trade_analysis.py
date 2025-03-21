@@ -35,6 +35,7 @@ st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 
 
 markout_periods = ['t0', 't5', 't10', 't30', 't60']
+markout_colors = ['#FF0000', '#00FF00', '#0000FF', '#FFA500', '#800080']
 
 
 def process_trades_df(raw_trades_df: pd.DataFrame) -> pd.DataFrame:
@@ -373,7 +374,6 @@ def plot_cumulative_pnl_for_user_account(user_trades_df, filter_ua):
 	)
 
 	# Add markout traces to fourth subplot
-	colors = ['#FF0000', '#00FF00', '#0000FF', '#FFA500', '#800080']
 	for i, period in enumerate(markout_periods):
 		# Filter out NaN values before creating histogram
 		premium_data = user_trades_df[f'userPremium{period}'].dropna()
@@ -386,45 +386,9 @@ def plot_cumulative_pnl_for_user_account(user_trades_df, filter_ua):
 						  y=user_trades_df[f'userPremium{period}Dollar'].cumsum(),
 						  mode='lines+markers',
 						  name=f'Markout {period}',
-						  line=dict(width=1, color=colors[i]),
+						  line=dict(width=1, color=markout_colors[i]),
 						  marker=dict(size=marker_size)),
 				row=4, col=1
-			)
-
-			# Calculate metrics on filtered data
-			mean_val = premium_data.mean()
-			std_val = premium_data.std()
-			median_val = premium_data.median()
-			skew_val = premium_data.skew()
-
-			# Get histogram data to find max y value
-			hist, bins = np.histogram(premium_data, bins=100, density=False)
-			max_y = np.max(hist) if len(hist) > 0 else 0
-			max_x = np.max(bins) if len(bins) > 0 else 0
-
-			# Add metrics as annotations
-			fig1.add_annotation(
-				text=f"Mean: {mean_val:.4f}<br>Std: {std_val:.4f}<br>Median: {median_val:.4f}<br>Skew: {skew_val:.4f}",
-				xref=f"x{i+1}",
-				yref=f"y{i+1}",
-				x=max_x,
-				y=max_y,
-				showarrow=False,
-				align="right",
-				row=4,
-				col=1
-			)
-		else:
-			# Add empty subplot with message if no valid data
-			fig1.add_annotation(
-				text="No valid data",
-				xref=f"x{i+1}",
-				yref=f"y{i+1}",
-				x=0.5,
-				y=0.5,
-				showarrow=False,
-				row=4,
-				col=1
 			)
 
 	# Second figure for histograms
@@ -433,7 +397,6 @@ def plot_cumulative_pnl_for_user_account(user_trades_df, filter_ua):
 		horizontal_spacing=0.05
 	)
 
-	colors = ['#FF0000', '#00FF00', '#0000FF', '#FFA500', '#800080']
 
 	for i, period in enumerate(markout_periods):
 		# Filter out NaN values before creating histogram
@@ -447,7 +410,7 @@ def plot_cumulative_pnl_for_user_account(user_trades_df, filter_ua):
 					x=premium_data,  # Use filtered data
 					name=f'Markout {period}',
 					nbinsx=100,
-					marker_color=colors[i],
+					marker_color=markout_colors[i],
 					opacity=0.5,
 					showlegend=False
 				),
