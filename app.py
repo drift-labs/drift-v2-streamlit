@@ -273,19 +273,9 @@ def main():
     elif tab.lower() == "vamm":
         loop = asyncio.new_event_loop()
         loop.run_until_complete(vamm(clearing_house))
-<<<<<<< HEAD
-=======
     elif tab.lower() == "dlp":
         loop = asyncio.new_event_loop()
         loop.run_until_complete(dlp(clearing_house))        
-    elif tab.lower() == "conditionalliquidity":
-        loop = asyncio.new_event_loop()
-        loop.run_until_complete(condliqcheck(clearing_house))
-    # elif tab.lower() == 'network':
-    #     loop = asyncio.new_event_loop()
-    #     loop.run_until_complete(show_network(clearing_house))
-
->>>>>>> 9c0435e (add dlp calculator)
     elif tab.lower() == "mm":
         loop = asyncio.new_event_loop()
         loop.run_until_complete(mm_program_page(clearing_house, env))
