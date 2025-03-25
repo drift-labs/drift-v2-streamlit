@@ -43,6 +43,8 @@ from tabs.userstatus import userstatus_page
 from tabs.uservolume import show_user_volume
 from tabs.post_trade_analysis import post_trade_analysis
 from tabs.vamm import vamm
+from tabs.dlp import dlp
+
 from tabs.vaults import vaults
 
 # import ssl
@@ -106,6 +108,7 @@ def main():
         "API",
         "SuperStake",
         "vAMM",
+        "DLP",
         "FundingHistory",
         "UserDataRaw",
         "Vaults",
@@ -270,6 +273,19 @@ def main():
     elif tab.lower() == "vamm":
         loop = asyncio.new_event_loop()
         loop.run_until_complete(vamm(clearing_house))
+<<<<<<< HEAD
+=======
+    elif tab.lower() == "dlp":
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(dlp(clearing_house))        
+    elif tab.lower() == "conditionalliquidity":
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(condliqcheck(clearing_house))
+    # elif tab.lower() == 'network':
+    #     loop = asyncio.new_event_loop()
+    #     loop.run_until_complete(show_network(clearing_house))
+
+>>>>>>> 9c0435e (add dlp calculator)
     elif tab.lower() == "mm":
         loop = asyncio.new_event_loop()
         loop.run_until_complete(mm_program_page(clearing_house, env))
