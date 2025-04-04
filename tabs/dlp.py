@@ -399,7 +399,7 @@ async def dlp(ch: DriftClient):
             market: PerpMarketAccount = ch.get_perp_market_account(i)
             op = market.amm.historical_oracle_data.last_oracle_price/1e6
 
-            vamm_base_inventory = market.amm.base_asset_amount_with_amm / 1e9
+            vamm_base_inventory = -market.amm.base_asset_amount_with_amm / 1e9
             vamm_quote_inventory = vamm_base_inventory * op
 
             sol_wgt = 0
@@ -517,7 +517,7 @@ async def dlp(ch: DriftClient):
         eth_val_adj = max(eth_val * scaling_factor, 0)
 
         # Step 6: Remaining in USDC
-        usdc_val_adj = (dlp_aum - (sol_val_adj + btc_val_adj + eth_val_adj)).clip(0,1e12)
+        usdc_val_adj = np.clip(dlp_aum - (sol_val_adj + btc_val_adj + eth_val_adj), 0, 1e12)
 
         # Step 7: Convert back to base units
         sol_amt_adj = sol_val_adj / sol_price
