@@ -1,54 +1,24 @@
-# from driftpy.constants.config import configs
-import asyncio
-import datetime
 import json
-import os
-import sys
 
-# using time module
-import time
-from dataclasses import dataclass
-from tokenize import tabsize
-
-import driftpy
 import numpy as np
 import pandas as pd
-import plotly.express as px
 import requests
 import streamlit as st
-from aiocache import Cache, cached
 from anchorpy import (
-    Context,
     EventParser,
     Idl,
     Program,
     ProgramAccount,
-    Provider,
-    Wallet,
 )
-from anchorpy.provider import Signature
-from driftpy.accounts import (
-    get_perp_market_account,
-    get_spot_market_account,
-    get_state_account,
-    get_user_account,
-)
-from driftpy.addresses import *
-from driftpy.constants.numeric_constants import *
-from driftpy.constants.perp_markets import PerpMarketConfig, devnet_perp_market_configs
-from driftpy.constants.spot_markets import SpotMarketConfig, devnet_spot_market_configs
+from driftpy.accounts import get_spot_market_account
+from driftpy.addresses import get_insurance_fund_vault_public_key
 from driftpy.drift_client import DriftClient
-from driftpy.drift_user import get_token_amount
-from driftpy.types import InsuranceFundStakeAccount, SpotMarketAccount
-from solana.rpc.async_api import AsyncClient
-from solders.keypair import Keypair
 from solders.pubkey import Pubkey
 
 from datafetch.transaction_fetch import (
     load_token_balance,
     transaction_history_for_account,
 )
-from helpers import serialize_perp_market_2, serialize_spot_market
 
 pd.options.plotting.backend = "plotly"
 
@@ -116,7 +86,6 @@ async def competitions(ch: DriftClient, env):
             signature = c2.selectbox("tx signatures:", all_sigs)
             # st.write(df[df.signature==signature])
             if do_check:
-                theset = [signature]
                 idxes = [i for i, x in enumerate(all_sigs) if x == signature]
                 txs = []
                 sigs = []
@@ -169,7 +138,6 @@ async def competitions(ch: DriftClient, env):
             (await program.account[act["name"]].all()) for act in idl["accounts"]
         ]
     vault_df = pd.DataFrame()
-    vault_dep_def = pd.DataFrame()
     with tabs[1]:
         for acts in accounts:
             res = []
@@ -429,7 +397,8 @@ async def competitions(ch: DriftClient, env):
                     api_result = requests.get(
                         "https://mainnet-beta.api.drift.trade/sweepstakes/results"
                     ).json()
-                except:
+                except Exception as e:
+                    print(e)
                     api_result = {}
 
                 if "data" in api_result:
@@ -500,7 +469,6 @@ async def competitions(ch: DriftClient, env):
                 # signature = c2.selectbox('tx signatures:', winner_txs, key='jkdfla')
                 # st.write(df[df.signature==signature])
                 if do_check is not None:
-                    theset = winner_txs
                     idxes = [i for i, x in enumerate(all_sigs) if x in winner_txs]
                     txs = []
                     sigs = []
@@ -516,7 +484,6 @@ async def competitions(ch: DriftClient, env):
                     # txs = [transaction_got]
                     # sigs = all_sigs[idx]
                     logs = []
-                    i = 0
                     for tx, sig in zip(txs, sigs):
 
                         def call_b(evt):
