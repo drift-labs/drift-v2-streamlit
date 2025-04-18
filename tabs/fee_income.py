@@ -1,50 +1,14 @@
-import sys
-from tokenize import tabsize
-
-import driftpy
-import numpy as np
-import pandas as pd
-
-pd.options.plotting.backend = "plotly"
-
-import asyncio
-import csv
 import datetime
-import json
-import os
 import time
-from dataclasses import dataclass
-from datetime import date, timedelta
-from io import StringIO
+from datetime import timedelta
 
-import numpy as np
 import pandas as pd
 import requests
 import streamlit as st
-from aiocache import Cache, cached
-from anchorpy import EventParser, Provider, Wallet
-from driftpy.accounts import (
-    get_perp_market_account,
-    get_spot_market_account,
-    get_state_account,
-    get_user_account,
-)
-from driftpy.addresses import *
-from driftpy.constants.numeric_constants import *
-from driftpy.constants.perp_markets import (
-    PerpMarketConfig,
-    devnet_perp_market_configs,
-    mainnet_perp_market_configs,
-)
-from driftpy.constants.spot_markets import SpotMarketConfig, devnet_spot_market_configs
+from driftpy.constants.perp_markets import mainnet_perp_market_configs
 from driftpy.drift_client import DriftClient
-from driftpy.drift_user import get_token_amount
-from driftpy.types import InsuranceFundStakeAccount, SpotMarketAccount
-from solana.rpc.async_api import AsyncClient
-from solders.keypair import Keypair
-from solders.pubkey import Pubkey
 
-from helpers import serialize_perp_market_2, serialize_spot_market
+pd.options.plotting.backend = "plotly"
 
 URL_PREFIX = "https://data.api.drift.trade"
 
@@ -185,8 +149,6 @@ def display_fee_tier_metrics(fee_tier_data, tier_name):
 
 
 async def fee_income_page(ch: DriftClient):
-    state = await get_state_account(ch.program)
-
     market = st.selectbox(
         "Select market",
         mainnet_perp_market_configs,
