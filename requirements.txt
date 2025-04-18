@@ -1,7 +1,7 @@
 aiocache==0.11.1
 anchorpy==0.21.0
 ccxt
-driftpy>=0.8.40
+driftpy>=0.8.42
 numpy==1.26.3
 openai
 pandas==2.2.3
