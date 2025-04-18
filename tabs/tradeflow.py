@@ -6,6 +6,8 @@ import pytz
 import streamlit as st
 from driftpy.addresses import get_user_account_public_key
 from driftpy.constants.numeric_constants import QUOTE_PRECISION
+from driftpy.constants.perp_markets import mainnet_perp_market_configs
+from driftpy.constants.spot_markets import mainnet_spot_market_configs
 from driftpy.drift_client import (
     AccountSubscriptionConfig,
     DriftClient,
@@ -13,7 +15,6 @@ from driftpy.drift_client import (
 )
 from solders.pubkey import Pubkey
 
-from constants import ALL_MARKET_NAMES
 from datafetch.api_fetch import get_trades_for_range_pandas
 from datafetch.s3_fetch import load_s3_trades_data
 
@@ -149,7 +150,20 @@ async def trade_flow_analysis(clearinghouse: DriftClient):
     selection = modecol.radio("mode:", ["summary", "per-market"], index=1)
     data_source = modecol.radio("data source:", ["api", "s3"], index=0)
 
-    markets = ALL_MARKET_NAMES
+    perp_markets = [m.symbol for m in mainnet_perp_market_configs]
+    spot_markets = [m.symbol for m in mainnet_spot_market_configs]
+
+    markets = []
+    for perp in perp_markets:
+        markets.append(perp)
+        base_asset = perp.replace("-PERP", "")
+        if base_asset in spot_markets:
+            markets.append(base_asset)
+
+    for spot in spot_markets:
+        if spot not in markets:
+            markets.append(spot)
+
     market = None
     if selection == "per-market":
         market = col1.selectbox("select market:", markets)
