@@ -1,64 +1,40 @@
-import sys
-from tokenize import tabsize
+import datetime
+import time
 
-import driftpy
 import numpy as np
 import pandas as pd
-
-pd.options.plotting.backend = "plotly"
-
-# from driftpy.constants.config import configs
-import asyncio
-import datetime
-import json
-import os
-
-# using time module
-import time
-from dataclasses import dataclass
-
 import plotly.express as px
 import requests
 import streamlit as st
-from aiocache import Cache, cached
-from anchorpy import EventParser, Provider, Wallet
 from driftpy.accounts import (
-    get_perp_market_account,
     get_spot_market_account,
     get_state_account,
-    get_user_account,
 )
-from driftpy.addresses import *
-from driftpy.constants.numeric_constants import *
-from driftpy.constants.perp_markets import PerpMarketConfig, devnet_perp_market_configs
-from driftpy.constants.spot_markets import SpotMarketConfig, devnet_spot_market_configs
+from driftpy.addresses import get_insurance_fund_vault_public_key
+from driftpy.constants.numeric_constants import QUOTE_PRECISION
 from driftpy.drift_client import DriftClient
 from driftpy.drift_user import get_token_amount
-from driftpy.types import InsuranceFundStakeAccount, SpotMarketAccount
-from solana.rpc.async_api import AsyncClient
-from solders.keypair import Keypair
-from solders.pubkey import Pubkey
+from driftpy.types import InsuranceFundStakeAccount
 
 from datafetch.s3_fetch import load_if_s3_data
-from datafetch.transaction_fetch import (
-    load_token_balance,
-    transaction_history_for_account,
-)
-from helpers import serialize_perp_market_2, serialize_spot_market
+from datafetch.transaction_fetch import load_token_balance
+
+pd.options.plotting.backend = "plotly"
 
 
 async def insurance_fund_page(ch: DriftClient, env):
     is_devnet = env == "devnet"
     try:
         all_stakers = await ch.program.account["InsuranceFundStake"].all()
-    except:
+    except Exception as e:
+        print(e)
         all_stakers = []
 
     authorities = set()
     dfs = []
     for x in all_stakers:
         key = str(x.public_key)
-        staker: InsuranceFundStake = x.account
+        staker: InsuranceFundStakeAccount = x.account
 
         if staker.authority not in authorities:
             authorities.add(staker.authority)
@@ -87,12 +63,14 @@ async def insurance_fund_page(ch: DriftClient, env):
     spot_df = pd.DataFrame()
     try:
         perp_df = pd.read_csv(p_url, index_col=[0]).T
-    except:
+    except Exception as e:
+        print(e)
         st.warning("cannot load perp data: " + p_url)
 
     try:
         spot_df = pd.read_csv(s_url, index_col=[0]).T
-    except:
+    except Exception as e:
+        print(e)
         st.warning("cannot load spot data: " + s_url)
 
     name_rot, spot_asts = load_if_s3_data(current_year, current_month, dd, is_devnet)
@@ -135,7 +113,8 @@ async def insurance_fund_page(ch: DriftClient, env):
             if_vault = get_insurance_fund_vault_public_key(ch.program_id, i)
             try:
                 v_amount = await load_token_balance(conn, if_vault)
-            except:
+            except Exception as e:
+                print(e)
                 v_amount = 0
 
             protocol_balance = v_amount * protocol_n_shares / (max(total_n_shares, 1))
@@ -204,7 +183,8 @@ async def insurance_fund_page(ch: DriftClient, env):
                 # st.write(full_if_url)
                 try:
                     ccs[0].plotly_chart(name_rot[name]["amount"].cumsum().plot())
-                except:
+                except Exception as e:
+                    print(e)
                     ccs[0].write("cannot load full_if_url")
 
     with tabs[0]:
@@ -423,7 +403,8 @@ async def insurance_fund_page(ch: DriftClient, env):
             rot = rot.set_index("ts")
             rot.index = pd.to_datetime((rot.index * 1e9).astype(int))
             st.dataframe(rot)
-        except:
+        except Exception as e:
+            print(e)
             st.warning("cannot read: " + full_if_url)
 
         for x in all_stakers:
@@ -461,12 +442,8 @@ async def insurance_fund_page(ch: DriftClient, env):
             vv += [usdc_if_value]  # todo
             fee_pools = perp_names.tolist() + spot_pools.tolist()
             usdc_rev_pool_idx = len(fee_pools)
-            if_idx = len(fee_pools) + 1
             all_pools = fee_pools + ["fee pool"]
             all_pool_indexes = range(0, len(all_pools) + 1)
-            perp_indexes = range(0, len(perp_names))
-            # st.write(perp_names.tolist())
-            # st.write(vv)
             fig = go.Figure(
                 go.Sankey(
                     arrangement="snap",
@@ -536,15 +513,6 @@ async def insurance_fund_page(ch: DriftClient, env):
             df = df[((df.marketType == "spot") & (df.marketIndex == 1))]
             df = df[((df.ifPayment != 0) & (df.pnl != 0))]
 
-        # .merge(
-        #     pd.DataFrame([x['perpBankruptcy'] for x in br], index=indexes),
-        #     # how='outer'
-        #     )
-
-        # except:
-        #     st.warning('cannot load bankruptcies')
-
-        # df = df.set_index('ts')
         df.index = pd.to_datetime((df.index.astype(int) * 1e9).astype(int))
 
         tt = df[["ifPayment", "pnl"]].cumsum()

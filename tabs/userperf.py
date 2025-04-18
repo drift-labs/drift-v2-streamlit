@@ -5,63 +5,28 @@
 # - position over time
 
 import datetime
-import timeit
-import sys
-from tokenize import tabsize
 
-import driftpy
-from driftpy.accounts.oracle import *
 import numpy as np
 import pandas as pd
+import plotly.graph_objs as go
+import streamlit as st
+from driftpy.accounts import (
+    UserAccount,
+    get_state_account,
+)
+from driftpy.accounts.oracle import *
+from driftpy.addresses import *
+from driftpy.constants.numeric_constants import *
+from driftpy.drift_client import DriftClient
+from solana.rpc.types import MemcmpOpts
+from solders.pubkey import Pubkey
 
 from constants import ALL_MARKET_NAMES
 from tabs.fee_income import get_trades_for_range_pandas
 
-
 pd.options.plotting.backend = "plotly"
 
-import asyncio
-from dataclasses import dataclass
-from enum import Enum
-import json
-import os
-import time
-
-# from driftpy.constants.config import configs
-from anchorpy import EventParser
-from anchorpy import Provider
-from anchorpy import Wallet
-from datafetch.s3_fetch import load_user_settlepnl
-from datafetch.s3_fetch import load_user_trades
-from driftpy.accounts import get_perp_market_account
-from driftpy.accounts import get_spot_market_account
-from driftpy.accounts import get_state_account
-from driftpy.accounts import get_user_account
-from driftpy.accounts import UserAccount
-from driftpy.addresses import *
-from driftpy.constants.numeric_constants import *
-from driftpy.constants.perp_markets import devnet_perp_market_configs
-from driftpy.constants.perp_markets import PerpMarketConfig
-from driftpy.constants.spot_markets import devnet_spot_market_configs
-from driftpy.constants.spot_markets import SpotMarketConfig
-from driftpy.drift_client import AccountSubscriptionConfig
-from driftpy.drift_client import DriftClient
-from driftpy.drift_user import DriftUser
-from driftpy.drift_user import get_token_amount
-from driftpy.math.margin import calculate_asset_weight
-from driftpy.math.margin import MarginCategory
-from driftpy.types import MarginRequirementType
-from helpers import serialize_perp_market_2
-from helpers import serialize_spot_market
-import plotly.graph_objs as go
-import requests
-from solana.rpc.types import MemcmpOpts
-from solana.rpc.async_api import AsyncClient
-from solders.keypair import Keypair
-from solders.pubkey import Pubkey
-import streamlit as st
-
-markout_periods = ['t0', 't5', 't10', 't30', 't60']
+markout_periods = ["t0", "t5", "t10", "t30", "t60"]
 
 
 def load_trade_history(market_symbol, start_date, end_date):
@@ -111,36 +76,67 @@ def filter_dups(df):
     ).reset_index(drop=True)
     return df
 
-def process_trades_df(fairs_marked_out_df: pd.DataFrame, raw_trades_df: pd.DataFrame) -> pd.DataFrame:
-    '''
+
+def process_trades_df(
+    fairs_marked_out_df: pd.DataFrame, raw_trades_df: pd.DataFrame
+) -> pd.DataFrame:
+    """
     Adds some columns to the market_trades_df for analysis in a vectorized way
-    '''
+    """
     # Select required columns
-    filtered = raw_trades_df[[
-        'filler', 'fillRecordId', 'taker', 'takerOrderId', 'takerOrderDirection', 'takerFee',
-        'maker', 'makerOrderId', 'makerOrderDirection', 'makerFee',
-        'baseAssetAmountFilled', 'quoteAssetAmountFilled', 'oraclePrice', 'actionExplanation', 'txSig',
-		'slot',
-    ]].copy()
+    filtered = raw_trades_df[
+        [
+            "filler",
+            "fillRecordId",
+            "taker",
+            "takerOrderId",
+            "takerOrderDirection",
+            "takerFee",
+            "maker",
+            "makerOrderId",
+            "makerOrderDirection",
+            "makerFee",
+            "baseAssetAmountFilled",
+            "quoteAssetAmountFilled",
+            "oraclePrice",
+            "actionExplanation",
+            "txSig",
+            "slot",
+        ]
+    ].copy()
 
     # Vectorized operations
-    filtered['makerBaseSigned'] = np.where(filtered['makerOrderDirection'] == 'long',
-                                           filtered['baseAssetAmountFilled'],
-                                           filtered['baseAssetAmountFilled'] * -1)
-    filtered['makerQuoteSigned'] = np.where(filtered['makerOrderDirection'] == 'long',
-                                            -1 * filtered['quoteAssetAmountFilled'],
-                                            filtered['quoteAssetAmountFilled'])
-    filtered['takerBaseSigned'] = np.where(filtered['takerOrderDirection'] == 'long',
-                                           filtered['baseAssetAmountFilled'],
-                                           filtered['baseAssetAmountFilled'] * -1)
-    filtered['takerQuoteSigned'] = np.where(filtered['takerOrderDirection'] == 'long',
-                                            -1 * filtered['quoteAssetAmountFilled'],
-                                            filtered['quoteAssetAmountFilled'])
-    filtered['fillPrice'] = filtered['quoteAssetAmountFilled'] / filtered['baseAssetAmountFilled']
-    filtered['isFillerMaker'] = filtered['filler'] == filtered['maker']
-    filtered['isFillerTaker'] = filtered['filler'] == filtered['taker']
-    filtered['makerOrderDirectionNum'] = np.where(filtered['makerOrderDirection'] == 'long', 1, -1)
-    filtered['takerOrderDirectionNum'] = np.where(filtered['takerOrderDirection'] == 'long', 1, -1)
+    filtered["makerBaseSigned"] = np.where(
+        filtered["makerOrderDirection"] == "long",
+        filtered["baseAssetAmountFilled"],
+        filtered["baseAssetAmountFilled"] * -1,
+    )
+    filtered["makerQuoteSigned"] = np.where(
+        filtered["makerOrderDirection"] == "long",
+        -1 * filtered["quoteAssetAmountFilled"],
+        filtered["quoteAssetAmountFilled"],
+    )
+    filtered["takerBaseSigned"] = np.where(
+        filtered["takerOrderDirection"] == "long",
+        filtered["baseAssetAmountFilled"],
+        filtered["baseAssetAmountFilled"] * -1,
+    )
+    filtered["takerQuoteSigned"] = np.where(
+        filtered["takerOrderDirection"] == "long",
+        -1 * filtered["quoteAssetAmountFilled"],
+        filtered["quoteAssetAmountFilled"],
+    )
+    filtered["fillPrice"] = (
+        filtered["quoteAssetAmountFilled"] / filtered["baseAssetAmountFilled"]
+    )
+    filtered["isFillerMaker"] = filtered["filler"] == filtered["maker"]
+    filtered["isFillerTaker"] = filtered["filler"] == filtered["taker"]
+    filtered["makerOrderDirectionNum"] = np.where(
+        filtered["makerOrderDirection"] == "long", 1, -1
+    )
+    filtered["takerOrderDirectionNum"] = np.where(
+        filtered["takerOrderDirection"] == "long", 1, -1
+    )
 
     # # Find closest times in fairs_marked_out_df for each trade
     # closest_times = fairs_marked_out_df.index.get_indexer(filtered.index, method='nearest')
@@ -163,185 +159,259 @@ def process_trades_df(fairs_marked_out_df: pd.DataFrame, raw_trades_df: pd.DataF
 
     return filtered
 
+
 def render_trades_stats_for_user_account(processed_trades_df, filter_ua):
-	if filter_ua is None:
-		user_trades_df = processed_trades_df.loc[
-			(processed_trades_df['maker'].isna()) | (processed_trades_df['taker'].isna())
-		].copy()
-	else:
-		user_trades_df = processed_trades_df.loc[
-			(processed_trades_df['maker'] == filter_ua) | (processed_trades_df['taker'] == filter_ua)
-		].copy()
+    if filter_ua is None:
+        user_trades_df = processed_trades_df.loc[
+            (processed_trades_df["maker"].isna())
+            | (processed_trades_df["taker"].isna())
+        ].copy()
+    else:
+        user_trades_df = processed_trades_df.loc[
+            (processed_trades_df["maker"] == filter_ua)
+            | (processed_trades_df["taker"] == filter_ua)
+        ].copy()
 
-	user_trades_df['isMaker'] = user_trades_df['maker'] == filter_ua
-	user_trades_df['counterparty'] = np.where(
-		user_trades_df['maker'] == filter_ua,
-		user_trades_df['taker'],
-		user_trades_df['maker']
-	)
-	user_trades_df['user_direction'] = np.where(
-		user_trades_df['maker'] == filter_ua,
-		user_trades_df['makerOrderDirection'],
-		user_trades_df['takerOrderDirection']
-	)
+    user_trades_df["isMaker"] = user_trades_df["maker"] == filter_ua
+    user_trades_df["counterparty"] = np.where(
+        user_trades_df["maker"] == filter_ua,
+        user_trades_df["taker"],
+        user_trades_df["maker"],
+    )
+    user_trades_df["user_direction"] = np.where(
+        user_trades_df["maker"] == filter_ua,
+        user_trades_df["makerOrderDirection"],
+        user_trades_df["takerOrderDirection"],
+    )
 
-	user_trades_df['user_direction_num'] = np.where(
-		user_trades_df['maker'] == filter_ua,
-		user_trades_df['makerOrderDirectionNum'],
-		user_trades_df['takerOrderDirectionNum']
-	)
+    user_trades_df["user_direction_num"] = np.where(
+        user_trades_df["maker"] == filter_ua,
+        user_trades_df["makerOrderDirectionNum"],
+        user_trades_df["takerOrderDirectionNum"],
+    )
 
-	user_trades_df['user_fee_recv'] = np.where(
-		user_trades_df['maker'] == filter_ua,
-		-1 * user_trades_df['makerFee'],
-		-1 * user_trades_df['takerFee'],
-	)
+    user_trades_df["user_fee_recv"] = np.where(
+        user_trades_df["maker"] == filter_ua,
+        -1 * user_trades_df["makerFee"],
+        -1 * user_trades_df["takerFee"],
+    )
 
-	user_trades_df['user_base'] = np.where(
-		user_trades_df['maker'] == filter_ua,
-		user_trades_df['makerBaseSigned'],
-		user_trades_df['takerBaseSigned'],
-	)
+    user_trades_df["user_base"] = np.where(
+        user_trades_df["maker"] == filter_ua,
+        user_trades_df["makerBaseSigned"],
+        user_trades_df["takerBaseSigned"],
+    )
 
-	user_trades_df['user_quote'] = np.where(
-		user_trades_df['maker'] == filter_ua,
-		user_trades_df['makerQuoteSigned'],
-		user_trades_df['takerQuoteSigned'],
-	)
+    user_trades_df["user_quote"] = np.where(
+        user_trades_df["maker"] == filter_ua,
+        user_trades_df["makerQuoteSigned"],
+        user_trades_df["takerQuoteSigned"],
+    )
 
-	# for markout_period in markout_periods:
-	# 	user_trades_df[f'user_markout_{markout_period}'] = np.where(
-	# 		user_trades_df['maker'] == filter_ua,
-	# 		user_trades_df[f'maker_markout_{markout_period}'],
-	# 		user_trades_df[f'taker_markout_{markout_period}'],
-	# 	)
+    # for markout_period in markout_periods:
+    # 	user_trades_df[f'user_markout_{markout_period}'] = np.where(
+    # 		user_trades_df['maker'] == filter_ua,
+    # 		user_trades_df[f'maker_markout_{markout_period}'],
+    # 		user_trades_df[f'taker_markout_{markout_period}'],
+    # 	)
 
-	user_trades_df['user_cum_base'] = user_trades_df['user_base'].cumsum() # base_position
-	user_trades_df['user_cum_base_prev'] = user_trades_df['user_cum_base'].shift(1).fillna(0) # base_position_prev
-	user_trades_df['user_cum_quote'] = user_trades_df['user_quote'].cumsum()
+    user_trades_df["user_cum_base"] = user_trades_df[
+        "user_base"
+    ].cumsum()  # base_position
+    user_trades_df["user_cum_base_prev"] = (
+        user_trades_df["user_cum_base"].shift(1).fillna(0)
+    )  # base_position_prev
+    user_trades_df["user_cum_quote"] = user_trades_df["user_quote"].cumsum()
 
-	# update types:
-	# 0: flip pos
-	# 1: increase pos
-	# -1: decrease pos
+    # update types:
+    # 0: flip pos
+    # 1: increase pos
+    # -1: decrease pos
 
-	user_trades_df['position_update'] = 0
-	user_trades_df['user_quote_entry_amount'] = 0.0
-	user_trades_df['user_quote_breakeven_amount'] = 0.0
-	user_trades_df['realized_pnl'] = 0.0
+    user_trades_df["position_update"] = 0
+    user_trades_df["user_quote_entry_amount"] = 0.0
+    user_trades_df["user_quote_breakeven_amount"] = 0.0
+    user_trades_df["realized_pnl"] = 0.0
 
-	for i in range(0, len(user_trades_df)):
-		prev_row = user_trades_df.iloc[i - 1]
-		current_row = user_trades_df.iloc[i]
+    for i in range(0, len(user_trades_df)):
+        prev_row = user_trades_df.iloc[i - 1]
+        current_row = user_trades_df.iloc[i]
 
-		prev_quote_entry_amt = prev_row['user_quote_entry_amount']
-		prev_quote_breakeven_amt = prev_row['user_quote_breakeven_amount']
-		delta_base_amt = np.abs(current_row['user_base'])
-		curr_base_amt = np.abs(prev_row['user_cum_base'])
+        prev_quote_entry_amt = prev_row["user_quote_entry_amount"]
+        prev_quote_breakeven_amt = prev_row["user_quote_breakeven_amount"]
+        delta_base_amt = np.abs(current_row["user_base"])
+        curr_base_amt = np.abs(prev_row["user_cum_base"])
 
-		if current_row['user_cum_base'] * current_row['user_cum_base_prev'] < 0:
-			# flipped direction
-			user_trades_df.loc[user_trades_df.index[i], 'position_update'] = 0
-			# same for BE and entry
-			new_quote = current_row['user_quote'] - (current_row['user_quote'] * curr_base_amt / delta_base_amt)
-			user_trades_df.loc[user_trades_df.index[i], 'user_quote_entry_amount'] = new_quote
-			user_trades_df.loc[user_trades_df.index[i], 'user_quote_breakeven_amount'] = new_quote
-			user_trades_df.loc[user_trades_df.index[i], 'realized_pnl'] = prev_row['user_quote_entry_amount'] + (current_row['user_quote'] - new_quote)
-		elif current_row['user_cum_base_prev'] == 0:
-			# opening new position
-			user_trades_df.loc[user_trades_df.index[i], 'position_update'] = 1
-			user_trades_df.loc[user_trades_df.index[i], 'user_quote_entry_amount'] = prev_quote_entry_amt + current_row['user_quote']
-			user_trades_df.loc[user_trades_df.index[i], 'user_quote_breakeven_amount'] = prev_quote_breakeven_amt + current_row['user_quote']
-		else:
-			if current_row['user_direction_num'] == np.sign(current_row['user_cum_base_prev']):
-				# increase position
-				user_trades_df.loc[user_trades_df.index[i], 'position_update'] = 1
-				user_trades_df.loc[user_trades_df.index[i], 'user_quote_entry_amount'] = prev_quote_entry_amt + current_row['user_quote']
-				user_trades_df.loc[user_trades_df.index[i], 'user_quote_breakeven_amount'] = prev_quote_breakeven_amt + current_row['user_quote']
-				user_trades_df.loc[user_trades_df.index[i], 'realized_pnl'] = 0
-			else:
-				# decrease position
-				user_trades_df.loc[user_trades_df.index[i], 'position_update'] = -1
-				new_quote_entry_amt = prev_quote_entry_amt - (prev_quote_entry_amt * delta_base_amt / curr_base_amt)
-				user_trades_df.loc[user_trades_df.index[i], 'user_quote_entry_amount'] = new_quote_entry_amt
-				user_trades_df.loc[user_trades_df.index[i], 'user_quote_breakeven_amount'] = prev_quote_breakeven_amt - (prev_quote_breakeven_amt * delta_base_amt / curr_base_amt)
-				user_trades_df.loc[user_trades_df.index[i], 'realized_pnl'] = prev_row['user_quote_entry_amount'] - new_quote_entry_amt + current_row['user_quote']
+        if current_row["user_cum_base"] * current_row["user_cum_base_prev"] < 0:
+            # flipped direction
+            user_trades_df.loc[user_trades_df.index[i], "position_update"] = 0
+            # same for BE and entry
+            new_quote = current_row["user_quote"] - (
+                current_row["user_quote"] * curr_base_amt / delta_base_amt
+            )
+            user_trades_df.loc[user_trades_df.index[i], "user_quote_entry_amount"] = (
+                new_quote
+            )
+            user_trades_df.loc[
+                user_trades_df.index[i], "user_quote_breakeven_amount"
+            ] = new_quote
+            user_trades_df.loc[user_trades_df.index[i], "realized_pnl"] = prev_row[
+                "user_quote_entry_amount"
+            ] + (current_row["user_quote"] - new_quote)
+        elif current_row["user_cum_base_prev"] == 0:
+            # opening new position
+            user_trades_df.loc[user_trades_df.index[i], "position_update"] = 1
+            user_trades_df.loc[user_trades_df.index[i], "user_quote_entry_amount"] = (
+                prev_quote_entry_amt + current_row["user_quote"]
+            )
+            user_trades_df.loc[
+                user_trades_df.index[i], "user_quote_breakeven_amount"
+            ] = prev_quote_breakeven_amt + current_row["user_quote"]
+        else:
+            if current_row["user_direction_num"] == np.sign(
+                current_row["user_cum_base_prev"]
+            ):
+                # increase position
+                user_trades_df.loc[user_trades_df.index[i], "position_update"] = 1
+                user_trades_df.loc[
+                    user_trades_df.index[i], "user_quote_entry_amount"
+                ] = prev_quote_entry_amt + current_row["user_quote"]
+                user_trades_df.loc[
+                    user_trades_df.index[i], "user_quote_breakeven_amount"
+                ] = prev_quote_breakeven_amt + current_row["user_quote"]
+                user_trades_df.loc[user_trades_df.index[i], "realized_pnl"] = 0
+            else:
+                # decrease position
+                user_trades_df.loc[user_trades_df.index[i], "position_update"] = -1
+                new_quote_entry_amt = prev_quote_entry_amt - (
+                    prev_quote_entry_amt * delta_base_amt / curr_base_amt
+                )
+                user_trades_df.loc[
+                    user_trades_df.index[i], "user_quote_entry_amount"
+                ] = new_quote_entry_amt
+                user_trades_df.loc[
+                    user_trades_df.index[i], "user_quote_breakeven_amount"
+                ] = prev_quote_breakeven_amt - (
+                    prev_quote_breakeven_amt * delta_base_amt / curr_base_amt
+                )
+                user_trades_df.loc[user_trades_df.index[i], "realized_pnl"] = (
+                    prev_row["user_quote_entry_amount"]
+                    - new_quote_entry_amt
+                    + current_row["user_quote"]
+                )
 
-	user_trades_df['avg_price'] = np.abs(user_trades_df['user_quote_entry_amount'] / user_trades_df['user_cum_base'])
-	user_trades_df['user_cum_fee'] = user_trades_df['user_fee_recv'].cumsum()
-	user_trades_df['user_cum_pnl'] = user_trades_df['realized_pnl'].cumsum()
+    user_trades_df["avg_price"] = np.abs(
+        user_trades_df["user_quote_entry_amount"] / user_trades_df["user_cum_base"]
+    )
+    user_trades_df["user_cum_fee"] = user_trades_df["user_fee_recv"].cumsum()
+    user_trades_df["user_cum_pnl"] = user_trades_df["realized_pnl"].cumsum()
 
-	return user_trades_df
+    return user_trades_df
 
 
 def plot_cumulative_pnl_for_user_account(user_trades_df, filter_ua):
-	# Create a new figure for cumulative base and quote plots
-	# fig_cumulative = make_subplots(rows=2, cols=1, shared_xaxes=True, subplot_titles=('Cumulative Base Asset', 'Cumulative PnL'))
+    # Create a new figure for cumulative base and quote plots
+    # fig_cumulative = make_subplots(rows=2, cols=1, shared_xaxes=True, subplot_titles=('Cumulative Base Asset', 'Cumulative PnL'))
 
-	fig_1 = go.Figure()
-	fig_1.update_layout(
-		title_text=f'Cum. Base Amounts ({filter_ua})',
-		height=400,
-		width=1200,
-		showlegend=True,
-	)
+    fig_1 = go.Figure()
+    fig_1.update_layout(
+        title_text=f"Cum. Base Amounts ({filter_ua})",
+        height=400,
+        width=1200,
+        showlegend=True,
+    )
 
-	fig_2 = go.Figure()
-	fig_2.update_layout(
-		title_text=f'Cum. PnL({filter_ua})',
-		height=400,
-		width=1200,
-		showlegend=True,
-		barmode='overlay',
-	)
+    fig_2 = go.Figure()
+    fig_2.update_layout(
+        title_text=f"Cum. PnL({filter_ua})",
+        height=400,
+        width=1200,
+        showlegend=True,
+        barmode="overlay",
+    )
 
-	marker_size = 3
+    marker_size = 3
 
-	fig_1.add_trace(
-		go.Scatter(x=user_trades_df.index, y=user_trades_df['user_cum_base'], mode='lines+markers', name='Cumulative Base', line=dict(width=1), marker=dict(size=marker_size)),
-		# row=1, col=1
-	)
+    fig_1.add_trace(
+        go.Scatter(
+            x=user_trades_df.index,
+            y=user_trades_df["user_cum_base"],
+            mode="lines+markers",
+            name="Cumulative Base",
+            line=dict(width=1),
+            marker=dict(size=marker_size),
+        ),
+        # row=1, col=1
+    )
 
-	fig_2.add_trace(
-		go.Scatter(x=user_trades_df.index, y=user_trades_df['user_cum_fee'], mode='lines+markers', name='Cumulative Fee Received', line=dict(width=1), marker=dict(size=marker_size)),
-		# row=2, col=1
-	)
-	fig_2.add_trace(
-		go.Scatter(x=user_trades_df.index, y=user_trades_df['user_cum_pnl'], mode='lines+markers', name='Cumulative PnL', line=dict(width=1), marker=dict(size=marker_size)),
-		# row=2, col=1
-	)
+    fig_2.add_trace(
+        go.Scatter(
+            x=user_trades_df.index,
+            y=user_trades_df["user_cum_fee"],
+            mode="lines+markers",
+            name="Cumulative Fee Received",
+            line=dict(width=1),
+            marker=dict(size=marker_size),
+        ),
+        # row=2, col=1
+    )
+    fig_2.add_trace(
+        go.Scatter(
+            x=user_trades_df.index,
+            y=user_trades_df["user_cum_pnl"],
+            mode="lines+markers",
+            name="Cumulative PnL",
+            line=dict(width=1),
+            marker=dict(size=marker_size),
+        ),
+        # row=2, col=1
+    )
 
-	st.plotly_chart(fig_1, use_container_width=True)
-	st.plotly_chart(fig_2, use_container_width=True)
+    st.plotly_chart(fig_1, use_container_width=True)
+    st.plotly_chart(fig_2, use_container_width=True)
 
 
-async def show_user_perf_for_authority(dc: DriftClient, user_authority: str, market_symbol: str, start_date: datetime.date, end_date: datetime.date):
+async def show_user_perf_for_authority(
+    dc: DriftClient,
+    user_authority: str,
+    market_symbol: str,
+    start_date: datetime.date,
+    end_date: datetime.date,
+):
     user_authority_pk = Pubkey.from_string(user_authority)
 
     user_stats_pk = get_user_stats_account_public_key(dc.program_id, user_authority_pk)
-    user_stat = await dc.program.account['UserStats'].fetch(user_stats_pk)
+    user_stat = await dc.program.account["UserStats"].fetch(user_stats_pk)
 
-    users = await dc.program.account['User'].all(filters=[
-        MemcmpOpts(offset=0, bytes='TfwwBiNJtao'),
-        MemcmpOpts(offset=8, bytes=user_authority)
-    ])
+    users = await dc.program.account["User"].all(
+        filters=[
+            MemcmpOpts(offset=0, bytes="TfwwBiNJtao"),
+            MemcmpOpts(offset=8, bytes=user_authority),
+        ]
+    )
 
-    user_names = [bytes(x.account.name).decode('utf-8', errors='ignore').strip() + f' ({x.account.sub_account_id})' for x in users]
-    user_selected = st.selectbox('select subaccount:', user_names)
-    print('selected:', user_selected)
+    user_names = [
+        bytes(x.account.name).decode("utf-8", errors="ignore").strip()
+        + f" ({x.account.sub_account_id})"
+        for x in users
+    ]
+    user_selected = st.selectbox("select subaccount:", user_names)
+    print("selected:", user_selected)
     selected_user: UserAccount = users[user_names.index(user_selected)].account
     selected_user_pk = users[user_names.index(user_selected)].public_key
-    print('selected user:', str(selected_user_pk))
-    print('selected user:', selected_user.perp_positions)
-    print('market symbol:', market_symbol)
-    print('start date:', start_date)
-    print('end date:', end_date)
+    print("selected user:", str(selected_user_pk))
+    print("selected user:", selected_user.perp_positions)
+    print("market symbol:", market_symbol)
+    print("start date:", start_date)
+    print("end date:", end_date)
 
     market_trades_df = load_trade_history(market_symbol, start_date, end_date)
     st.write(market_trades_df)
     processed_trades_df = process_trades_df(None, market_trades_df)
     print(selected_user_pk)
-    user_trades = render_trades_stats_for_user_account(processed_trades_df, selected_user_pk)
+    user_trades = render_trades_stats_for_user_account(
+        processed_trades_df, selected_user_pk
+    )
     st.write(user_trades)
     plot_cumulative_pnl_for_user_account(user_trades, selected_user_pk)
     # chu = DriftUser(
@@ -355,6 +425,7 @@ async def show_user_perf_for_authority(dc: DriftClient, user_authority: str, mar
     # user_acct = chu.get_user_account()
     # nom = bytes(user_acct.name).decode("utf-8")
     # st.write('"' + nom + '"')
+
 
 async def show_user_perf(clearing_house: DriftClient):
     # print("loading frens")
@@ -372,8 +443,12 @@ async def show_user_perf(clearing_house: DriftClient):
     # authorities = sorted([str(x.account.authority) for x in every_user_stats])
     authority0, mol0, mol2, market_symbol0 = st.columns([10, 3, 3, 3])
 
-    authority = authority0.text_input("authority", value='GXyE3Snk3pPYX4Nz9QRVBrnBfbJRTAQYxuy5DRdnebAn')
-    market_symbol = market_symbol0.selectbox("market symbol", ALL_MARKET_NAMES, index=ALL_MARKET_NAMES.index("SOL-PERP"))
+    authority = authority0.text_input(
+        "authority", value="GXyE3Snk3pPYX4Nz9QRVBrnBfbJRTAQYxuy5DRdnebAn"
+    )
+    market_symbol = market_symbol0.selectbox(
+        "market symbol", ALL_MARKET_NAMES, index=ALL_MARKET_NAMES.index("SOL-PERP")
+    )
     # if len(frens) == 0:
     #     user_authorities = authority0.selectbox(
     #         "user authorities",
@@ -445,10 +520,12 @@ async def show_user_perf(clearing_house: DriftClient):
     )  # (datetime.datetime.now(tzInfo)))
     # dates = pd.date_range(start_date, end_date)
 
-    await show_user_perf_for_authority(clearing_house, authority, market_symbol, start_date, end_date)
+    await show_user_perf_for_authority(
+        clearing_house, authority, market_symbol, start_date, end_date
+    )
     # for user_authority in user_authorities:
-        # st.markdown('user stats')
-        # st.dataframe(pd.DataFrame([x for x in user_stats]).T)
+    # st.markdown('user stats')
+    # st.dataframe(pd.DataFrame([x for x in user_stats]).T)
 
     # else:
     #     st.text('not found')

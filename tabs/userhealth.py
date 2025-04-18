@@ -2,52 +2,44 @@ import sys
 from tokenize import tabsize
 
 import driftpy
-from driftpy.accounts.oracle import *
 import numpy as np
 import pandas as pd
-
+from driftpy.accounts.oracle import *
 
 pd.options.plotting.backend = "plotly"
 
 import asyncio
-from dataclasses import dataclass
-from enum import Enum
 import json
 import os
 import time
+from dataclasses import dataclass
+from enum import Enum
+
+import streamlit as st
 
 # from driftpy.constants.config import configs
-from anchorpy import EventParser
-from anchorpy import Provider
-from anchorpy import Wallet
-from driftpy.accounts import get_perp_market_account
-from driftpy.accounts import get_spot_market_account
-from driftpy.accounts import get_state_account
-from driftpy.accounts import get_user_account
+from anchorpy import EventParser, Provider, Wallet
+from driftpy.accounts import (
+    get_perp_market_account,
+    get_spot_market_account,
+    get_state_account,
+    get_user_account,
+)
 from driftpy.addresses import *
 from driftpy.constants.numeric_constants import *
-from driftpy.constants.perp_markets import devnet_perp_market_configs
-from driftpy.constants.perp_markets import PerpMarketConfig
-from driftpy.constants.spot_markets import devnet_spot_market_configs
-from driftpy.constants.spot_markets import SpotMarketConfig
-from driftpy.drift_client import AccountSubscriptionConfig
-from driftpy.drift_client import DriftClient
-from driftpy.drift_user import DriftUser
-from driftpy.drift_user import get_token_amount
-from driftpy.math.margin import calculate_asset_weight
-from driftpy.math.margin import MarginCategory
+from driftpy.constants.perp_markets import PerpMarketConfig, devnet_perp_market_configs
+from driftpy.constants.spot_markets import SpotMarketConfig, devnet_spot_market_configs
+from driftpy.drift_client import AccountSubscriptionConfig, DriftClient
+from driftpy.drift_user import DriftUser, get_token_amount
+from driftpy.math.margin import MarginCategory, calculate_asset_weight
 from driftpy.types import MarginRequirementType
-from helpers import serialize_perp_market_2
-from helpers import serialize_spot_market
 from solana.rpc.async_api import AsyncClient
 from solders.keypair import Keypair
 from solders.pubkey import Pubkey
-import streamlit as st
 
 
 @st.cache_data
 def get_loaded_auths():
-
     query_p = st.query_params
     frens = query_p.get("authority", [])
     if frens != []:
@@ -84,7 +76,6 @@ async def show_user_health(clearing_house: DriftClient):
     # print(user_authorities)
     # user_authority = user_authorities[0]
     if len(user_authorities):
-
         # await chu.set_cache()
         # cache = chu.CACHE
 

@@ -1,39 +1,12 @@
 import csv
-import sys
-from tokenize import tabsize
-
-import driftpy
-import numpy as np
-import pandas as pd
-
-pd.options.plotting.backend = "plotly"
-
-# from driftpy.constants.config import configs
-import asyncio
-import json
 import os
-from dataclasses import dataclass
-from glob import glob
 
 import openai
+import pandas as pd
 import streamlit as st
-from anchorpy import EventParser, Provider, Wallet
-from driftpy.accounts import (
-    get_perp_market_account,
-    get_spot_market_account,
-    get_state_account,
-    get_user_account,
-)
-from driftpy.constants.numeric_constants import *
-from driftpy.constants.perp_markets import PerpMarketConfig, devnet_perp_market_configs
-from driftpy.constants.spot_markets import SpotMarketConfig, devnet_spot_market_configs
 from driftpy.drift_client import DriftClient
-from driftpy.drift_user import DriftUser
-from solana.rpc.async_api import AsyncClient
-from solders.keypair import Keypair
-from solders.pubkey import Pubkey
 
-from helpers import serialize_perp_market_2, serialize_spot_market
+pd.options.plotting.backend = "plotly"
 
 DRIFT_CONTEXT = """
 ```
@@ -270,8 +243,6 @@ Additionally, during the cooldown period, if a user wishes to cancel the unstake
 async def gpt_page(clearing_house: DriftClient):
     gpt_ans = ""
 
-    ch = clearing_house
-    # state = await get_state_account(ch.program)
     col1, col2, col22, col3 = st.columns([6, 2, 2, 1])
     OPENAI_API_KEY = col22.text_input("OPENAI_API_KEY", "")
     if OPENAI_API_KEY != "" and len(OPENAI_API_KEY) > 4:

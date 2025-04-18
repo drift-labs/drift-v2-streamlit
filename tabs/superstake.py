@@ -34,8 +34,6 @@ from solana.rpc.async_api import AsyncClient
 from solders.keypair import Keypair
 from solders.pubkey import Pubkey
 
-from helpers import serialize_perp_market_2, serialize_spot_market
-
 pd.options.plotting.backend = "plotly"
 
 PERCENTAGE_PRECISION = 1e6

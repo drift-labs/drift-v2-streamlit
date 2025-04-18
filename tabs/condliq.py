@@ -46,7 +46,6 @@ from solders.keypair import Keypair
 from solders.pubkey import Pubkey
 
 from datafetch.snapshot_fetch import load_user_snapshot
-from helpers import serialize_perp_market_2, serialize_spot_market
 
 
 async def condliqcheck(clearing_house: DriftClient):
