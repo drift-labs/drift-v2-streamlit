@@ -37,8 +37,6 @@ from solana.rpc.types import MemcmpOpts
 from solders.keypair import Keypair
 from solders.pubkey import Pubkey
 
-from helpers import serialize_perp_market_2, serialize_spot_market
-
 
 async def slot_ts_fetch(_ch):
     ss = json.loads((await _ch.program.provider.connection.get_slot()).to_json())[

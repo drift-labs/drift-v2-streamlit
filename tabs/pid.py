@@ -36,7 +36,7 @@ from solders.keypair import Keypair
 from solders.pubkey import Pubkey
 
 from datafetch.transaction_fetch import load_token_balance
-from helpers import serialize_perp_market_2, serialize_spot_market
+from helpers import serialize_perp_market_2
 
 pd.options.plotting.backend = "plotly"
 

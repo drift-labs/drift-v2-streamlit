@@ -1,40 +1,13 @@
-import sys
-from tokenize import tabsize
-
-import driftpy
-import numpy as np
 import pandas as pd
-
-pd.options.plotting.backend = "plotly"
-
-# from driftpy.constants.config import configs
-import asyncio
-import json
-import os
-from dataclasses import dataclass
-
-import requests
 import streamlit as st
-from aiocache import Cache, cached
-from anchorpy import EventParser, Provider, Wallet
 from driftpy.accounts import (
     get_perp_market_account,
     get_spot_market_account,
     get_state_account,
-    get_user_account,
 )
-from driftpy.addresses import *
-from driftpy.constants.numeric_constants import *
-from driftpy.constants.perp_markets import PerpMarketConfig, devnet_perp_market_configs
-from driftpy.constants.spot_markets import SpotMarketConfig, devnet_spot_market_configs
 from driftpy.drift_client import DriftClient
-from driftpy.drift_user import get_token_amount
-from driftpy.types import InsuranceFundStakeAccount, SpotMarketAccount
-from solana.rpc.async_api import AsyncClient
-from solders.keypair import Keypair
-from solders.pubkey import Pubkey
 
-from helpers import serialize_perp_market_2, serialize_spot_market
+pd.options.plotting.backend = "plotly"
 
 
 async def fee_page(ch: DriftClient):
@@ -54,7 +27,7 @@ async def fee_page(ch: DriftClient):
     df = pd.DataFrame(state.perp_fee_structure.fee_tiers)
     df["taker_fee"] = df["fee_numerator"] / df["fee_denominator"]
     df["maker_rebate"] = df["maker_rebate_numerator"] / df["maker_rebate_denominator"]
-    # df['maker_rebate'] = df['maker_rebate_numerator']/df['maker_rebate_denominator']
+
     df["referee_discount"] = df["referee_fee_numerator"] / df["referee_fee_denominator"]
     df["referrer_reward"] = (
         df["referrer_reward_numerator"] / df["referrer_reward_denominator"]
@@ -71,7 +44,7 @@ async def fee_page(ch: DriftClient):
     df = pd.DataFrame(state.spot_fee_structure.fee_tiers)
     df["taker_fee"] = df["fee_numerator"] / df["fee_denominator"]
     df["maker_rebate"] = df["maker_rebate_numerator"] / df["maker_rebate_denominator"]
-    # df['maker_rebate'] = df['maker_rebate_numerator']/df['maker_rebate_denominator']
+
     df["referee_discount"] = df["referee_fee_numerator"] / df["referee_fee_denominator"]
     df["referrer_reward"] = (
         df["referrer_reward_numerator"] / df["referrer_reward_denominator"]

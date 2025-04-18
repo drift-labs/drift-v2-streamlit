@@ -1,54 +1,24 @@
-import sys
-from tokenize import tabsize
-
-import driftpy
-import numpy as np
 import pandas as pd
+import requests
+import streamlit as st
+from driftpy.drift_client import DriftClient
 
 pd.options.plotting.backend = "plotly"
 
-# from driftpy.constants.config import configs
-import asyncio
-import json
-import os
-from dataclasses import dataclass
-from glob import glob
-
-import requests
-import streamlit as st
-from anchorpy import EventParser, Provider, Wallet
-from driftpy.accounts import (
-    get_perp_market_account,
-    get_spot_market_account,
-    get_state_account,
-    get_user_account,
-)
-from driftpy.constants.numeric_constants import *
-from driftpy.constants.perp_markets import PerpMarketConfig, devnet_perp_market_configs
-from driftpy.constants.spot_markets import SpotMarketConfig, devnet_spot_market_configs
-from driftpy.drift_client import DriftClient
-from driftpy.drift_user import DriftUser
-from solana.rpc.async_api import AsyncClient
-from solders.keypair import Keypair
-from solders.pubkey import Pubkey
-
-from helpers import serialize_perp_market_2, serialize_spot_market
-
 
 async def show_api(clearing_house: DriftClient):
-    ch = clearing_house
     tags = []
     tag_url = "https://api.github.com/repos/drift-labs/protocol-v2/tags"
     try:
         tags = requests.get(tag_url).json()
         tags = [x["name"] for x in tags]
-    except:
+    except Exception as e:
+        print(e)
         st.warning("trouble loading " + tag_url)
     tags = ["master"] + tags
     tt1, tt2 = st.columns(2)
     tag = tt1.selectbox("tag:", tags)
 
-    # url_tag = 'https://raw.githubusercontent.com/drift-labs/protocol-v2/v2.25.2/sdk/src/idl/drift.json'
     url = (
         "https://raw.githubusercontent.com/drift-labs/protocol-v2/"
         + tag
@@ -58,7 +28,6 @@ async def show_api(clearing_house: DriftClient):
 
     response = requests.get(url)
     data = response.json()
-    # st.json(data)
     tabs = st.tabs(["function", "types", "error"])
 
     def get_signer(x):
@@ -76,7 +45,6 @@ async def show_api(clearing_house: DriftClient):
     with tabs[1]:
         instrs = data["types"]
         df = pd.DataFrame(instrs)
-        # df['signer'] = df['accounts'].apply(lambda x: get_signer(x))
         st.dataframe(df)
     with tabs[2]:
         s1, s2 = st.columns(2)
