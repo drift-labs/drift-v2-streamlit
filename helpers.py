@@ -1,44 +1,51 @@
+import asyncio
+import copy
+import datetime
+import json
+import os
+import pprint
+import subprocess
+from subprocess import Popen
 
-from driftpy.math.amm import *
-# from driftpy.math.trade import *
-from driftpy.math.perp_position import *
-from driftpy.math.market import *
-# from driftpy.math.user import *
-
-from driftpy.types import *
+import pandas as pd
+from anchorpy import Program, Provider, WorkspaceType, create_workspace
+from driftpy.accounts import (
+    DataAndSlot,
+    get_perp_market_account,
+    get_spot_market_account,
+    get_state_account,
+    get_user_account,
+)
+from driftpy.admin import Admin
 from driftpy.constants.numeric_constants import *
 from driftpy.decode.utils import decode_name
+from driftpy.drift_client import AccountSubscriptionConfig, DriftClient
 
-from driftpy.setup.helpers import mock_oracle, _airdrop_user, set_price_feed, set_price_feed_detailed, adjust_oracle_pretrade, _mint_usdc_tx
-from driftpy.admin import Admin
-from driftpy.types import OracleSource
-
-from driftpy.drift_client import DriftClient, AccountSubscriptionConfig
 # from driftpy.math.amm import calculate_mark_price_amm
 from driftpy.drift_user import DriftUser
-from driftpy.accounts import get_perp_market_account, get_spot_market_account, get_user_account, get_state_account
-
-from anchorpy import Provider, Program, create_workspace, WorkspaceType
-import pprint
-import os
-import json
-import pandas as pd
-
-from solders.keypair import Keypair
-
-from subprocess import Popen
-import datetime
-import subprocess
-from solana.transaction import Transaction
-import asyncio
-from tqdm import tqdm
+from driftpy.math.amm import *
 from driftpy.math.margin import MarginCategory
-import copy
-from driftpy.accounts import DataAndSlot
+from driftpy.math.market import *
 
+# from driftpy.math.trade import *
+from driftpy.math.perp_position import *
+from driftpy.setup.helpers import (
+    _airdrop_user,
+    _mint_usdc_tx,
+    adjust_oracle_pretrade,
+    mock_oracle,
+    set_price_feed,
+    set_price_feed_detailed,
+)
+
+# from driftpy.math.user import *
+from driftpy.types import *
+from driftpy.types import OracleSource
+from solders.keypair import Keypair
+from tqdm import tqdm
 
 # over ~100k in value
-DRIFT_WHALE_LIST_SNAP = '''BRksHqLiq2gvQw1XxsZq6DXZjD3GB5a9J63tUBgd6QS9
+DRIFT_WHALE_LIST_SNAP = """BRksHqLiq2gvQw1XxsZq6DXZjD3GB5a9J63tUBgd6QS9
 7tDm5mxdUcqW423mX9a3yC9MkPQccaTYuPmAxZBkGNxn
 ETsaTf7tsaYEChnLfu2iwzFXWxJbCzwD6bPkMGCyB42d
 9e3dJLadqDVdunTLbQwW5rPyq2284pXJ6aWQtKD6DZHJ
@@ -154,10 +161,16 @@ fBcykPptSKYJTCRZ8JTSN53gGo5HyQ9SaJXSpfRMERR
 2nBqswD2KW4Vh63ZbFmtdRHT4n649bvS8n2XAueToi3P
 59XziNjAka8dh9yDnquThAFu5jdHbhbyanx6h14ZpZTj
 DBKiRUXMctVodDxNyQFrr2JJ1rZF6kr4muQDSKhMpBqu
-6oSJJuGZSz1UgeJDMMHGMz81NbbXWsBn4P5Jrn3YQJo4'''
+6oSJJuGZSz1UgeJDMMHGMz81NbbXWsBn4P5Jrn3YQJo4"""
 
 
-async def all_user_stats(all_users, ch: DriftClient, oracle_distort=None, pure_cache=None, only_one_index=None):
+async def all_user_stats(
+    all_users,
+    ch: DriftClient,
+    oracle_distort=None,
+    pure_cache=None,
+    only_one_index=None,
+):
     if all_users is not None:
         fuser: DriftUser = all_users[0].account
         chu = DriftUser(
@@ -183,25 +196,27 @@ async def all_user_stats(all_users, ch: DriftClient, oracle_distort=None, pure_c
             #     new_spots.append(x)
             # cache1['spot_market_oracles'] = new_spots
 
-            for i,(key, val) in enumerate(cache1['oracle_price_data'].items()):
+            for i, (key, val) in enumerate(cache1["oracle_price_data"].items()):
                 new_oracles_dat[key] = copy.deepcopy(val)
                 if only_one_index is None or only_one_index == key:
                     new_oracles_dat[key].data.price *= oracle_distort
                     # if oracle_distort >= 0:
                     #     assert(new_oracles_dat[key].data.price > 0)
-            cache1['oracle_price_data'] = new_oracles_dat
+            cache1["oracle_price_data"] = new_oracles_dat
             chu.drift_client.account_subscriber.cache = cache1
-
 
         res = []
         for x in all_users:
             key = str(x.public_key)
             account: DriftUser = x.account
 
-            chu = DriftUser(ch, user_public_key=account.user_public_key,
-                            # sub_account_id=account.sub_account_id,
-                            account_subscription=AccountSubscriptionConfig("cached"))
-                            # use_cache=True
+            chu = DriftUser(
+                ch,
+                user_public_key=account.user_public_key,
+                # sub_account_id=account.sub_account_id,
+                account_subscription=AccountSubscriptionConfig("cached"),
+            )
+            # use_cache=True
 
             chu.account_subscriber.user_and_slot = DataAndSlot(0, account)
             chu.drift_client.account_subscriber.cache = cache1
@@ -218,73 +233,158 @@ async def all_user_stats(all_users, ch: DriftClient, oracle_distort=None, pure_c
             upnl = chu.get_unrealized_pnl(True, only_one_index, None)
             leverage = chu.get_leverage(None)
 
-            res.append([leverage/MARGIN_PRECISION, spot_liab/QUOTE_PRECISION, perp_liab/QUOTE_PRECISION, margin_req/QUOTE_PRECISION, spot_value/QUOTE_PRECISION, upnl/QUOTE_PRECISION])
+            res.append(
+                [
+                    leverage / MARGIN_PRECISION,
+                    spot_liab / QUOTE_PRECISION,
+                    perp_liab / QUOTE_PRECISION,
+                    margin_req / QUOTE_PRECISION,
+                    spot_value / QUOTE_PRECISION,
+                    upnl / QUOTE_PRECISION,
+                ]
+            )
 
-        res = pd.DataFrame(res, columns=['leverage', 'spot_liability', 'perp_liability', 'margin_requirement', 'spot_value', 'upnl'], index=[x.public_key for x in all_users])
-        res['total_liability'] = res['perp_liability']+res['spot_liability']
-
+        res = pd.DataFrame(
+            res,
+            columns=[
+                "leverage",
+                "spot_liability",
+                "perp_liability",
+                "margin_requirement",
+                "spot_value",
+                "upnl",
+            ],
+            index=[x.public_key for x in all_users],
+        )
+        res["total_liability"] = res["perp_liability"] + res["spot_liability"]
 
         return res, chu
 
 
-
-
-
 def human_amm_df(df):
-    bool_fields = [ 'last_oracle_valid']
-    enum_fields = ['oracle_source']
-    pure_fields = ['last_update_slot', 'long_intensity_count', 'short_intensity_count',
-    'curve_update_intensity', 'amm_jit_intensity'
+    bool_fields = ["last_oracle_valid"]
+    enum_fields = ["oracle_source"]
+    pure_fields = [
+        "last_update_slot",
+        "long_intensity_count",
+        "short_intensity_count",
+        "curve_update_intensity",
+        "amm_jit_intensity",
     ]
     reserve_fields = [
-        'base_asset_reserve', 'quote_asset_reserve', 'min_base_asset_reserve', 'max_base_asset_reserve', 'sqrt_k',
-        'ask_base_asset_reserve', 'ask_quote_asset_reserve', 'bid_base_asset_reserve', 'bid_quote_asset_reserve',
-        'terminal_quote_asset_reserve', 'base_asset_amount_long', 'base_asset_amount_short', 'base_asset_amount_with_amm', 'base_asset_amount_with_unsettled_lp',
-        'user_lp_shares', 'min_order_size', 'max_position_size', 'order_step_size', 'max_open_interest',
-        ]
-
-    wgt_fields = ['initial_asset_weight', 'maintenance_asset_weight',
-
-    'initial_liability_weight', 'maintenance_liability_weight',
-    'unrealized_pnl_initial_asset_weight', 'unrealized_pnl_maintenance_asset_weight']
-
-    pct_fields = ['base_spread','long_spread', 'short_spread', 'max_spread', 'concentration_coef',
-    'last_oracle_reserve_price_spread_pct',
-    'last_oracle_conf_pct',
-        #spot market ones
-    'utilization_twap',
-
-    'imf_factor', 'unrealized_pnl_imf_factor', 'liquidator_fee', 'if_liquidation_fee',
-    'optimal_utilization', 'optimal_borrow_rate', 'max_borrow_rate',
+        "base_asset_reserve",
+        "quote_asset_reserve",
+        "min_base_asset_reserve",
+        "max_base_asset_reserve",
+        "sqrt_k",
+        "ask_base_asset_reserve",
+        "ask_quote_asset_reserve",
+        "bid_base_asset_reserve",
+        "bid_quote_asset_reserve",
+        "terminal_quote_asset_reserve",
+        "base_asset_amount_long",
+        "base_asset_amount_short",
+        "base_asset_amount_with_amm",
+        "base_asset_amount_with_unsettled_lp",
+        "user_lp_shares",
+        "min_order_size",
+        "max_position_size",
+        "order_step_size",
+        "max_open_interest",
     ]
 
-    funding_fields = ['cumulative_funding_rate_long', 'cumulative_funding_rate_short', 'last_funding_rate', 'last_funding_rate_long', 'last_funding_rate_short', 'last24h_avg_funding_rate']
-    quote_asset_fields = ['total_fee', 'total_mm_fee', 'total_exchange_fee', 'total_fee_minus_distributions',
-    'total_fee_withdrawn', 'total_liquidation_fee', 'cumulative_social_loss', 'net_revenue_since_last_funding',
-    'quote_asset_amount_long', 'quote_asset_amount_short', 'quote_entry_amount_long', 'quote_entry_amount_short',
-    'volume24h', 'long_intensity_volume', 'short_intensity_volume',
-    'total_spot_fee', 'quote_asset_amount',
-    'quote_break_even_amount_short', 'quote_break_even_amount_long'
+    wgt_fields = [
+        "initial_asset_weight",
+        "maintenance_asset_weight",
+        "initial_liability_weight",
+        "maintenance_liability_weight",
+        "unrealized_pnl_initial_asset_weight",
+        "unrealized_pnl_maintenance_asset_weight",
     ]
-    time_fields = ['last_trade_ts', 'last_mark_price_twap_ts', 'last_oracle_price_twap_ts', 'last_index_price_twap_ts',]
-    duration_fields = ['lp_cooldown_time', 'funding_period']
+
+    pct_fields = [
+        "base_spread",
+        "long_spread",
+        "short_spread",
+        "max_spread",
+        "concentration_coef",
+        "last_oracle_reserve_price_spread_pct",
+        "last_oracle_conf_pct",
+        # spot market ones
+        "utilization_twap",
+        "imf_factor",
+        "unrealized_pnl_imf_factor",
+        "liquidator_fee",
+        "if_liquidation_fee",
+        "optimal_utilization",
+        "optimal_borrow_rate",
+        "max_borrow_rate",
+    ]
+
+    funding_fields = [
+        "cumulative_funding_rate_long",
+        "cumulative_funding_rate_short",
+        "last_funding_rate",
+        "last_funding_rate_long",
+        "last_funding_rate_short",
+        "last24h_avg_funding_rate",
+    ]
+    quote_asset_fields = [
+        "total_fee",
+        "total_mm_fee",
+        "total_exchange_fee",
+        "total_fee_minus_distributions",
+        "total_fee_withdrawn",
+        "total_liquidation_fee",
+        "cumulative_social_loss",
+        "net_revenue_since_last_funding",
+        "quote_asset_amount_long",
+        "quote_asset_amount_short",
+        "quote_entry_amount_long",
+        "quote_entry_amount_short",
+        "volume24h",
+        "long_intensity_volume",
+        "short_intensity_volume",
+        "total_spot_fee",
+        "quote_asset_amount",
+        "quote_break_even_amount_short",
+        "quote_break_even_amount_long",
+    ]
+    time_fields = [
+        "last_trade_ts",
+        "last_mark_price_twap_ts",
+        "last_oracle_price_twap_ts",
+        "last_index_price_twap_ts",
+    ]
+    duration_fields = ["lp_cooldown_time", "funding_period"]
     px_fields = [
-        'last_oracle_normalised_price',
-        'order_tick_size',
-        'last_bid_price_twap', 'last_ask_price_twap', 'last_mark_price_twap', 'last_mark_price_twap5min',
-    'peg_multiplier',
-    'mark_std',
-    'oracle_std',
-    'last_oracle_price_twap', 'last_oracle_price_twap5min',
-    'last_oracle_price', 'last_oracle_conf',
-
-    #spot market ones
-        'last_index_bid_price', 'last_index_ask_price', 'last_index_price_twap', 'last_index_price_twap5min',
-
+        "last_oracle_normalised_price",
+        "order_tick_size",
+        "last_bid_price_twap",
+        "last_ask_price_twap",
+        "last_mark_price_twap",
+        "last_mark_price_twap5min",
+        "peg_multiplier",
+        "mark_std",
+        "oracle_std",
+        "last_oracle_price_twap",
+        "last_oracle_price_twap5min",
+        "last_oracle_price",
+        "last_oracle_conf",
+        # spot market ones
+        "last_index_bid_price",
+        "last_index_ask_price",
+        "last_index_price_twap",
+        "last_index_price_twap5min",
     ]
-    token_fields = ['deposit_token_twap', 'borrow_token_twap', 'max_token_deposits', 'withdraw_guard_threshold']
-    balance_fields = ['scaled_balance', 'deposit_balance', 'borrow_balance']
-    interest_fileds = ['cumulative_deposit_interest', 'cumulative_borrow_interest']
+    token_fields = [
+        "deposit_token_twap",
+        "borrow_token_twap",
+        "max_token_deposits",
+        "withdraw_guard_threshold",
+    ]
+    balance_fields = ["scaled_balance", "deposit_balance", "borrow_balance"]
+    interest_fileds = ["cumulative_deposit_interest", "cumulative_borrow_interest"]
     for col in df.columns:
         # if col in enum_fields or col in bool_fields:
         #     pass
@@ -305,8 +405,8 @@ def human_amm_df(df):
         elif col in px_fields:
             df[col] /= 1e6
         elif col in token_fields:
-            z = df['decimals'].values[0]
-            df[col] /= (10**z)
+            z = df["decimals"].values[0]
+            df[col] /= 10**z
         elif col in interest_fileds:
             df[col] /= 1e10
         elif col in time_fields:
@@ -316,34 +416,62 @@ def human_amm_df(df):
 
     return df
 
+
 def human_market_df(df):
-    enum_fields = ['status', 'contract_tier', '']
-    pure_fields = ['number_of_users', 'market_index', 'next_curve_record_id', 'next_fill_record_id', 'next_funding_rate_record_id']
-    pct_fields = ['imf_factor', 'unrealized_pnl_imf_factor', 'liquidator_fee', 'if_liquidation_fee']
-    wgt_fields = ['initial_asset_weight', 'maintenance_asset_weight',
-
-    'initial_liability_weight', 'maintenance_liability_weight',
-    'unrealized_pnl_initial_asset_weight', 'unrealized_pnl_maintenance_asset_weight']
-    margin_fields = ['margin_ratio_initial', 'margin_ratio_maintenance']
-    px_fields = [
-        'expiry_price',
-        'last_oracle_normalised_price',
-        'order_tick_size',
-        'last_bid_price_twap', 'last_ask_price_twap', 'last_mark_price_twap', 'last_mark_price_twap5min',
-    'peg_multiplier',
-    'mark_std',
-    'oracle_std',
-    'last_oracle_price_twap', 'last_oracle_price_twap5min',
-
+    enum_fields = ["status", "contract_tier", ""]
+    pure_fields = [
+        "number_of_users",
+        "market_index",
+        "next_curve_record_id",
+        "next_fill_record_id",
+        "next_funding_rate_record_id",
     ]
-    time_fields = ['last_trade_ts', 'expiry_ts', 'last_revenue_withdraw_ts']
-    balance_fields = ['scaled_balance', 'deposit_balance', 'borrow_balance']
+    pct_fields = [
+        "imf_factor",
+        "unrealized_pnl_imf_factor",
+        "liquidator_fee",
+        "if_liquidation_fee",
+    ]
+    wgt_fields = [
+        "initial_asset_weight",
+        "maintenance_asset_weight",
+        "initial_liability_weight",
+        "maintenance_liability_weight",
+        "unrealized_pnl_initial_asset_weight",
+        "unrealized_pnl_maintenance_asset_weight",
+    ]
+    margin_fields = ["margin_ratio_initial", "margin_ratio_maintenance"]
+    px_fields = [
+        "expiry_price",
+        "last_oracle_normalised_price",
+        "order_tick_size",
+        "last_bid_price_twap",
+        "last_ask_price_twap",
+        "last_mark_price_twap",
+        "last_mark_price_twap5min",
+        "peg_multiplier",
+        "mark_std",
+        "oracle_std",
+        "last_oracle_price_twap",
+        "last_oracle_price_twap5min",
+    ]
+    time_fields = ["last_trade_ts", "expiry_ts", "last_revenue_withdraw_ts"]
+    balance_fields = ["scaled_balance", "deposit_balance", "borrow_balance"]
     quote_fields = [
-        'total_spot_fee',
-        'unrealized_pnl_max_imbalance', 'quote_settled_insurance', 'quote_max_insurance',
-    'max_revenue_withdraw_per_period', 'revenue_withdraw_since_last_settle', ]
-    token_fields = ['borrow_token_twap', 'deposit_token_twap', 'withdraw_guard_threshold', 'max_token_deposits']
-    interest_fields = ['cumulative_deposit_interest', 'cumulative_borrow_interest']
+        "total_spot_fee",
+        "unrealized_pnl_max_imbalance",
+        "quote_settled_insurance",
+        "quote_max_insurance",
+        "max_revenue_withdraw_per_period",
+        "revenue_withdraw_since_last_settle",
+    ]
+    token_fields = [
+        "borrow_token_twap",
+        "deposit_token_twap",
+        "withdraw_guard_threshold",
+        "max_token_deposits",
+    ]
+    interest_fields = ["cumulative_deposit_interest", "cumulative_borrow_interest"]
 
     for col in df.columns:
         # if col in enum_fields:
@@ -367,66 +495,131 @@ def human_market_df(df):
         elif col in interest_fields:
             df[col] /= 1e10
         elif col in token_fields:
-            df[col] /= 1e6 #todo
+            df[col] /= 1e6  # todo
 
     return df
 
 
 def serialize_perp_market_2(market: PerpMarketAccount):
+    market_df = (
+        pd.json_normalize(market.__dict__)
+        .drop(["amm", "insurance_claim", "pnl_pool"], axis=1)
+        .pipe(human_market_df)
+    )
+    market_df["pubkey"] = str(market.pubkey)
+    market_df["name"] = decode_name(market.name)
+    market_df.columns = ["market." + col for col in market_df.columns]
 
-    market_df = pd.json_normalize(market.__dict__).drop(['amm', 'insurance_claim', 'pnl_pool'],axis=1).pipe(human_market_df)
-    market_df['pubkey'] = str(market.pubkey)
-    market_df['name'] = decode_name(market.name)
-    market_df.columns = ['market.'+col for col in market_df.columns]
+    amm_df = (
+        pd.json_normalize(market.amm.__dict__)
+        .drop(["historical_oracle_data", "fee_pool"], axis=1)
+        .pipe(human_amm_df)
+    )
+    amm_df.columns = ["market.amm." + col for col in amm_df.columns]
 
-    amm_df= pd.json_normalize(market.amm.__dict__).drop(['historical_oracle_data', 'fee_pool'],axis=1).pipe(human_amm_df)
-    amm_df.columns = ['market.amm.'+col for col in amm_df.columns]
+    amm_hist_oracle_df = pd.json_normalize(
+        market.amm.historical_oracle_data.__dict__
+    ).pipe(human_amm_df)
+    amm_hist_oracle_df.columns = [
+        "market.amm.historical_oracle_data." + col for col in amm_hist_oracle_df.columns
+    ]
 
-    amm_hist_oracle_df= pd.json_normalize(market.amm.historical_oracle_data.__dict__).pipe(human_amm_df)
-    amm_hist_oracle_df.columns = ['market.amm.historical_oracle_data.'+col for col in amm_hist_oracle_df.columns]
+    market_amm_pool_df = pd.json_normalize(market.amm.fee_pool.__dict__).pipe(
+        human_amm_df
+    )
+    market_amm_pool_df.columns = [
+        "market.amm.fee_pool." + col for col in market_amm_pool_df.columns
+    ]
 
-    market_amm_pool_df = pd.json_normalize(market.amm.fee_pool.__dict__).pipe(human_amm_df)
-    market_amm_pool_df.columns = ['market.amm.fee_pool.'+col for col in market_amm_pool_df.columns]
-
-    market_if_df = pd.json_normalize(market.insurance_claim.__dict__).pipe(human_market_df)
-    market_if_df.columns = ['market.insurance_claim.'+col for col in market_if_df.columns]
+    market_if_df = pd.json_normalize(market.insurance_claim.__dict__).pipe(
+        human_market_df
+    )
+    market_if_df.columns = [
+        "market.insurance_claim." + col for col in market_if_df.columns
+    ]
 
     market_pool_df = pd.json_normalize(market.pnl_pool.__dict__).pipe(human_amm_df)
-    market_pool_df.columns = ['market.pnl_pool.'+col for col in market_pool_df.columns]
+    market_pool_df.columns = [
+        "market.pnl_pool." + col for col in market_pool_df.columns
+    ]
 
-    result_df = pd.concat([market_df, amm_df, amm_hist_oracle_df, market_amm_pool_df, market_if_df, market_pool_df],axis=1)
+    result_df = pd.concat(
+        [
+            market_df,
+            amm_df,
+            amm_hist_oracle_df,
+            market_amm_pool_df,
+            market_if_df,
+            market_pool_df,
+        ],
+        axis=1,
+    )
     return result_df
 
+
 def serialize_spot_market(spot_market: SpotMarketAccount):
-    spot_market_df = pd.json_normalize(spot_market.__dict__).drop([
-        'historical_oracle_data', 'historical_index_data',
-        'insurance_fund', # todo
-        'spot_fee_pool', 'revenue_pool'
-        ], axis=1).pipe(human_amm_df)
-    spot_market_df['name'] = decode_name(spot_market.name)
-    spot_market_df['pubkey'] = str(spot_market.pubkey)
-    spot_market_df['oracle'] = str(spot_market.oracle)
-    spot_market_df['mint'] = str(spot_market.mint)
-    spot_market_df['vault'] = str(spot_market.vault)
+    spot_market_df = (
+        pd.json_normalize(spot_market.__dict__)
+        .drop(
+            [
+                "historical_oracle_data",
+                "historical_index_data",
+                "insurance_fund",  # todo
+                "spot_fee_pool",
+                "revenue_pool",
+            ],
+            axis=1,
+        )
+        .pipe(human_amm_df)
+    )
+    spot_market_df["name"] = decode_name(spot_market.name)
+    spot_market_df["pubkey"] = str(spot_market.pubkey)
+    spot_market_df["oracle"] = str(spot_market.oracle)
+    spot_market_df["mint"] = str(spot_market.mint)
+    spot_market_df["vault"] = str(spot_market.vault)
 
-    spot_market_df.columns = ['spot_market.'+col for col in spot_market_df.columns]
+    spot_market_df.columns = ["spot_market." + col for col in spot_market_df.columns]
 
-    if_df= pd.json_normalize(spot_market.insurance_fund.__dict__).pipe(human_amm_df)
-    if_df.columns = ['spot_market.insurance_fund.'+col for col in if_df.columns]
+    if_df = pd.json_normalize(spot_market.insurance_fund.__dict__).pipe(human_amm_df)
+    if_df.columns = ["spot_market.insurance_fund." + col for col in if_df.columns]
 
-    hist_oracle_df= pd.json_normalize(spot_market.historical_oracle_data.__dict__).pipe(human_amm_df)
-    hist_oracle_df.columns = ['spot_market.historical_oracle_data.'+col for col in hist_oracle_df.columns]
+    hist_oracle_df = pd.json_normalize(
+        spot_market.historical_oracle_data.__dict__
+    ).pipe(human_amm_df)
+    hist_oracle_df.columns = [
+        "spot_market.historical_oracle_data." + col for col in hist_oracle_df.columns
+    ]
 
-    hist_index_df= pd.json_normalize(spot_market.historical_index_data.__dict__).pipe(human_amm_df)
-    hist_index_df.columns = ['spot_market.historical_index_data.'+col for col in hist_index_df.columns]
+    hist_index_df = pd.json_normalize(spot_market.historical_index_data.__dict__).pipe(
+        human_amm_df
+    )
+    hist_index_df.columns = [
+        "spot_market.historical_index_data." + col for col in hist_index_df.columns
+    ]
 
+    market_pool_df = pd.json_normalize(spot_market.revenue_pool.__dict__).pipe(
+        human_amm_df
+    )
+    market_pool_df.columns = [
+        "spot_market.revenue_pool." + col for col in market_pool_df.columns
+    ]
 
-    market_pool_df = pd.json_normalize(spot_market.revenue_pool.__dict__).pipe(human_amm_df)
-    market_pool_df.columns = ['spot_market.revenue_pool.'+col for col in market_pool_df.columns]
+    market_fee_df = pd.json_normalize(spot_market.spot_fee_pool.__dict__).pipe(
+        human_amm_df
+    )
+    market_fee_df.columns = [
+        "spot_market.spot_fee_pool." + col for col in market_fee_df.columns
+    ]
 
-
-    market_fee_df = pd.json_normalize(spot_market.spot_fee_pool.__dict__).pipe(human_amm_df)
-    market_fee_df.columns = ['spot_market.spot_fee_pool.'+col for col in market_fee_df.columns]
-
-    result_df = pd.concat([spot_market_df, if_df, hist_oracle_df, hist_index_df, market_pool_df, market_fee_df],axis=1)
+    result_df = pd.concat(
+        [
+            spot_market_df,
+            if_df,
+            hist_oracle_df,
+            hist_index_df,
+            market_pool_df,
+            market_fee_df,
+        ],
+        axis=1,
+    )
     return result_df
