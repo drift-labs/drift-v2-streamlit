@@ -13,6 +13,7 @@ from solders.keypair import Keypair
 
 from tabs.api import show_api
 from tabs.competition import competitions
+from tabs.dlp import dlp
 from tabs.fee_income import fee_income_page
 from tabs.fees import fee_page
 from tabs.funding_history import funding_history
@@ -28,6 +29,7 @@ from tabs.orders import orders_page
 from tabs.overview_markets import show_overview_markets
 from tabs.perpLP import perp_lp_page
 from tabs.pid import show_pid_positions
+from tabs.post_trade_analysis import post_trade_analysis
 from tabs.refs import ref_page
 from tabs.simulations import sim_page
 from tabs.superstake import super_stake
@@ -41,10 +43,7 @@ from tabs.users_in_market import users_in_market_page
 from tabs.userstats import show_user_stats
 from tabs.userstatus import userstatus_page
 from tabs.uservolume import show_user_volume
-from tabs.post_trade_analysis import post_trade_analysis
 from tabs.vamm import vamm
-from tabs.dlp import dlp
-
 from tabs.vaults import vaults
 
 # import ssl
@@ -91,6 +90,7 @@ def main():
         "Simulations",
         "Logs",
         "Fee-Income",
+        "User-Performance",
         "Fee-Schedule",
         "Insurance-Fund",
         "Perp-LPs",
@@ -242,6 +242,10 @@ def main():
         loop = asyncio.new_event_loop()
         loop.run_until_complete(fee_income_page(clearing_house))
 
+    elif tab.lower() == "user-performance":
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(show_user_perf(clearing_house))
+
     elif tab.lower() == "refs":
         loop = asyncio.new_event_loop()
         loop.run_until_complete(ref_page(clearing_house))
@@ -275,7 +279,7 @@ def main():
         loop.run_until_complete(vamm(clearing_house))
     elif tab.lower() == "dlp":
         loop = asyncio.new_event_loop()
-        loop.run_until_complete(dlp(clearing_house))        
+        loop.run_until_complete(dlp(clearing_house))
     elif tab.lower() == "mm":
         loop = asyncio.new_event_loop()
         loop.run_until_complete(mm_program_page(clearing_house, env))
