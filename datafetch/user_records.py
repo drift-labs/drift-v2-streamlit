@@ -9,7 +9,7 @@ from streamlit import cache_data
 URL_PREFIX = "https://data.api.drift.trade"
 
 
-@cache_data(ttl=60 * 15)
+@cache_data(ttl=5)
 def _fetch_user_records(
     record_type: str, user_public_key: str, start_date: date, end_date: date
 ):

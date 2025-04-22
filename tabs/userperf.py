@@ -11,23 +11,22 @@ import pandas as pd
 import plotly.graph_objs as go
 import streamlit as st
 from driftpy.accounts import get_state_account
+from driftpy.constants.numeric_constants import BASE_PRECISION, QUOTE_PRECISION
+from driftpy.constants.perp_markets import mainnet_perp_market_configs
+from driftpy.constants.spot_markets import mainnet_spot_market_configs
 from driftpy.drift_client import DriftClient
 from solana.rpc.types import MemcmpOpts
 from solders.pubkey import Pubkey
 
-from constants import ALL_MARKET_NAMES
 from datafetch.user_records import (
     get_user_deposits,
     get_user_funding,
-    # get_user_liquidations, # Add if needed later
     get_user_settle_pnls,
     get_user_trades,
     get_user_withdrawals,
 )
 
 pd.options.plotting.backend = "plotly"
-
-markout_periods = ["t0", "t5", "t10", "t30", "t60"]
 
 
 def filter_dups(df):
@@ -398,9 +397,8 @@ def calculate_performance(records_df: pd.DataFrame, selected_user_pk: Pubkey):
     cumulative_funding_pnl = 0.0
     cumulative_realized_trading_pnl = 0.0
 
-    # --- Precision Constants (replace with values from driftpy if available) ---
-    QUOTE_PRECISION = 1_000_000  # Assuming USDC (6 decimals)
-    BASE_PRECISION = 1_000_000_000  # Example for SOL (9 decimals) - This needs to be dynamic per market
+    # --- Precision Constants ---
+    # Using imported BASE_PRECISION and QUOTE_PRECISION
 
     # --- Process records chronologically ---
     last_ts = None
@@ -584,23 +582,13 @@ def calculate_performance(records_df: pd.DataFrame, selected_user_pk: Pubkey):
                     )
                     continue
 
-                # TODO: Determine Base Precision based on marketIndex/Type
-                # current_base_precision = get_base_precision(record["marketIndex"], record["marketType"])
-                current_base_precision = BASE_PRECISION  # Placeholder
-
-                if (
-                    current_base_precision is None or current_base_precision == 0
-                ):  # Safety check
-                    st.error(
-                        f"Base precision is zero or None for market {record.get('marketType', '?')} {record.get('marketIndex', '?')} at {record.get('ts', 'N/A')}"
-                    )
-                    continue  # Skip
+                # Using imported BASE_PRECISION directly
+                current_base_precision = BASE_PRECISION
 
                 base_filled = base_filled_raw / current_base_precision
-                quote_filled = (
-                    quote_filled_raw / QUOTE_PRECISION
-                )  # Assuming quote is always USDC
+                quote_filled = quote_filled_raw / QUOTE_PRECISION
 
+                # Need market index/type for market_states key
                 market_index = record.get("marketIndex")
                 market_type = record.get("marketType")
                 if market_index is None or market_type is None:
@@ -611,6 +599,7 @@ def calculate_performance(records_df: pd.DataFrame, selected_user_pk: Pubkey):
                         f"Skipping trade record at {record.get('ts', 'N/A')} due to missing market info (Tx: {record.get('txSig', 'N/A')})"
                     )
                     continue
+
                 m_key = (market_type, market_index)
 
                 # Ensure market state exists before potentially updating fees or position
@@ -672,8 +661,6 @@ def calculate_performance(records_df: pd.DataFrame, selected_user_pk: Pubkey):
                 # Update balance (quote change from trade - fees)
                 current_usdc_balance += quote_change - fee
 
-                # print(f"{ts}: Trade ({market_type} {market_index}): BaseΔ {base_change:.4f}, QuoteΔ {quote_change:.2f}, Fee {fee:.4f}, Pos: {market_states[m_key]['position_size']:.4f}, Bal: {current_usdc_balance:.2f}")
-
                 # Record position change
                 position_rows.append(
                     {
@@ -700,6 +687,7 @@ def calculate_performance(records_df: pd.DataFrame, selected_user_pk: Pubkey):
         if (
             ts != last_ts
         ):  # Avoid duplicate entries if multiple records have the exact same timestamp
+            # Record USDC balance and PnL summary
             balance_rows.append(
                 {
                     "ts": ts,
@@ -718,15 +706,21 @@ def calculate_performance(records_df: pd.DataFrame, selected_user_pk: Pubkey):
                     - cumulative_fees,
                 }
             )
-            # Record position for non-trade events too, if needed for plotting
-            # for m_key, state in market_states.items():
-            #     position_rows.append({
-            #         "ts": ts,
-            #         "marketIndex": m_key[1],
-            #         "marketType": m_key[0],
-            #         "position_size": state['position_size'],
-            #         "record_type": record_type # Mark what triggered this state log
-            #     })
+
+            # Record position for all markets at this timestamp for plotting continuity
+            for m_key, state in market_states.items():
+                # Only record if position is non-zero or was non-zero previously (optional)
+                # if state['position_size'] != 0:
+                position_rows.append(
+                    {
+                        "ts": ts,
+                        "marketIndex": m_key[1],
+                        "marketType": m_key[0],
+                        "position_size": state["position_size"],
+                        "record_type": record_type,  # Mark what triggered this state log
+                    }
+                )
+
             last_ts = ts
 
     # --- Create output DataFrames ---
@@ -1052,8 +1046,21 @@ async def show_user_perf(clearing_house: DriftClient):
     authority = authority0.text_input(
         "authority", value="GXyE3Snk3pPYX4Nz9QRVBrnBfbJRTAQYxuy5DRdnebAn"
     )
+    perp_markets = [m.symbol for m in mainnet_perp_market_configs]
+    spot_markets = [m.symbol for m in mainnet_spot_market_configs]
+
+    markets = []
+    for perp in perp_markets:
+        markets.append(perp)
+        base_asset = perp.replace("-PERP", "")
+        if base_asset in spot_markets:
+            markets.append(base_asset)
+
+    for spot in spot_markets:
+        if spot not in markets:
+            markets.append(spot)
     market_symbol = market_symbol0.selectbox(
-        "market symbol", ALL_MARKET_NAMES, index=ALL_MARKET_NAMES.index("SOL-PERP")
+        "market symbol", markets, index=markets.index("SOL-PERP")
     )
     # if len(frens) == 0:
     #     user_authorities = authority0.selectbox(
