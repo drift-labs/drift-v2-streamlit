@@ -63,6 +63,10 @@ def add_fee_ratio(df):
     """
     Analyzes trade fee ratios accounting for both base and quote asset amounts
     """
+    df["quoteAssetAmountFilled"] = pd.to_numeric(df["quoteAssetAmountFilled"])
+    df["baseAssetAmountFilled"] = pd.to_numeric(df["baseAssetAmountFilled"])
+    df["takerFee"] = pd.to_numeric(df["takerFee"])
+
     df["price"] = df["quoteAssetAmountFilled"] / df["baseAssetAmountFilled"]
     df["trade_value"] = abs(df["baseAssetAmountFilled"] * df["price"])
     df["fee_ratio"] = abs(df["takerFee"] / df["trade_value"])
@@ -151,9 +155,12 @@ def display_fee_tier_metrics(fee_tier_data, tier_name):
 async def fee_income_page(ch: DriftClient):
     market = st.selectbox(
         "Select market",
-        mainnet_perp_market_configs,
+        options=[
+            {"market_index": c.market_index, "symbol": c.symbol}
+            for c in mainnet_perp_market_configs
+        ],
         index=0,
-        format_func=lambda x: f"({x.market_index}) {x.symbol}",
+        format_func=lambda x: f"({x['market_index']}) {x['symbol']}",
     )
 
     if "range_check" not in st.session_state:
@@ -195,7 +202,7 @@ async def fee_income_page(ch: DriftClient):
                 display_fee_tier_metrics(fee_tiers[tier_key], tier_name)
 
     else:
-        trades = get_trades_for_day_pandas(market.symbol, day)
+        trades = get_trades_for_day_pandas(market["symbol"], day)
         fee_tiers = get_fee_tier_trades(trades)
 
         tier_configs = [
