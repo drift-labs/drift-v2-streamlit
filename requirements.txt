@@ -1,7 +1,7 @@
 aiocache==0.11.1
 anchorpy==0.21.0
 ccxt
-driftpy>=0.8.42
+driftpy>=0.8.43
 numpy==1.26.3
 openai
 pandas==2.2.3
@@ -13,3 +13,4 @@ solders
 matplotlib==3.10.0
 streamlit==1.40.1
 tabulate==0.9.0
+httpx==0.28.1
