@@ -1,9 +1,9 @@
+import asyncio
 import datetime
-import time
 from datetime import timedelta
 
+import httpx
 import pandas as pd
-import requests
 import streamlit as st
 from driftpy.constants.perp_markets import mainnet_perp_market_configs
 from driftpy.drift_client import DriftClient
@@ -13,50 +13,94 @@ pd.options.plotting.backend = "plotly"
 URL_PREFIX = "https://data.api.drift.trade"
 
 
-def get_trades_for_range_pandas(market_symbol, start_date, end_date, page=1):
-    df = pd.DataFrame()
-    all_trades = []
-    current_date = start_date
-    while current_date <= end_date:
-        year = current_date.year
-        month = current_date.month
-        day = current_date.day
-        url = f"{URL_PREFIX}/market/{market_symbol}/trades/{year}/{month:02}/{day:02}"
-        try:
-            response = requests.get(url, params={"page": page})
+async def fetch_day_trades(
+    client: httpx.AsyncClient, market_symbol: str, date: datetime.date, page: int = 1
+) -> pd.DataFrame:
+    """Asynchronously fetches all trades for a specific market and day, handling pagination."""
+    all_records = []
+    year = date.year
+    month = date.month
+    day = date.day
+    url = f"{URL_PREFIX}/market/{market_symbol}/trades/{year}/{month:02}/{day:02}"
+
+    try:
+        current_page = page
+        while True:
+            response = await client.get(url, params={"page": current_page})
             response.raise_for_status()
-            json = response.json()
-            meta = json["meta"]
-            df = pd.DataFrame(json["records"])
-            while meta["nextPage"] is not None:
-                pg = meta["nextPage"]
-                response = requests.get(url, params={"page": pg})
-                print("Page", str(pg))
-                response.raise_for_status()
-                json = response.json()
-                df = pd.concat([df, pd.DataFrame(json["records"])], ignore_index=True)
-                meta = json["meta"]
-            time.sleep(0.1)
-            all_trades.append(df)
-        except requests.exceptions.RequestException as e:
-            print(f"Error fetching data for {current_date}: {e}")
-        except pd.errors.EmptyDataError:
-            print(f"No data available for {current_date}")
+            json_data = response.json()
+            meta = json_data["meta"]
+            records = json_data.get("records", [])
+            if not records:  # Stop if no records are returned
+                break
+            all_records.extend(records)
 
-        current_date += timedelta(days=1)
+            if meta.get("nextPage") is None:
+                break  # Exit loop if no nextPage key or value is None
+            current_page = meta["nextPage"]
+            print(
+                f"Fetching page {current_page} for {market_symbol} on {date}"
+            )  # Optional: keep for debug
+            await asyncio.sleep(0.1)  # Be nice to the API
 
-    if all_trades:
-        df = pd.concat(all_trades, ignore_index=True)
+        if all_records:
+            return pd.DataFrame(all_records)
+        else:
+            return pd.DataFrame()  # Return empty DataFrame if no records found
+
+    except httpx.RequestError as e:
+        print(f"Error fetching data for {date}: {e}")
+        return pd.DataFrame()  # Return empty DataFrame on error
+    except Exception as e:  # Catch potential JSON errors or other issues
+        print(f"Unexpected error for {date}: {e}")
+        return pd.DataFrame()
+
+
+async def get_trades_for_range_pandas(
+    market_symbol, start_date, end_date, status_container=None
+) -> pd.DataFrame:
+    """Fetches trades asynchronously for a date range."""
+    all_trades_list = []
+    date_list = [
+        start_date + timedelta(days=x) for x in range((end_date - start_date).days + 1)
+    ]
+    total_days = len(date_list)
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        tasks = []
+        for date in date_list:
+            tasks.append(fetch_day_trades(client, market_symbol, date))
+
+        for i, future in enumerate(asyncio.as_completed(tasks)):
+            if status_container:
+                progress = (i + 1) / total_days * 100
+                status_container.update(
+                    label=f"Fetching trades for {market_symbol}... ({i + 1}/{total_days} days processed, {progress:.1f}%)"
+                )
+
+            try:
+                daily_df = await future
+                if not daily_df.empty:
+                    all_trades_list.append(daily_df)
+            except Exception as e:
+                print(f"Error processing future for a day: {e}")
+
+    if not all_trades_list:
+        return pd.DataFrame()  # Return empty if all requests failed or yielded no data
+
+    df = pd.concat(all_trades_list, ignore_index=True)
+    if df.empty:
+        return df
+
+    if "ts" in df.columns:
+        df["ts"] = pd.to_datetime(df["ts"], unit="s")
+        df = df.sort_values(by="ts").reset_index(drop=True)
+        df = add_fee_ratio(df)
     else:
-        df = pd.DataFrame()
+        print("Warning: 'ts' column not found in combined trade data.")
+        return df
 
-    df["ts"] = pd.to_datetime(df["ts"], unit="s")
-    df = add_fee_ratio(df)
     return df
-
-
-def get_trades_for_day_pandas(market_symbol, day):
-    return get_trades_for_range_pandas(market_symbol, day, day)
 
 
 def add_fee_ratio(df):
@@ -163,31 +207,36 @@ async def fee_income_page(ch: DriftClient):
         format_func=lambda x: f"({x['market_index']}) {x['symbol']}",
     )
 
-    if "range_check" not in st.session_state:
-        st.session_state["range_check"] = False
-    range_check = st.session_state["range_check"]
-    day = st.date_input(
-        "Select day of trades to analyze",
-        datetime.datetime.now(),
-        disabled=range_check,
+    today = datetime.datetime.now()
+    date_range = st.date_input(
+        "Select date range",
+        (today, today),
+        max_value=today,
+        format="MM.DD.YYYY",
+        help="For a single day, select the same date for both the start and end.",
     )
-    date_range = None
 
-    st.checkbox("Select range of time instead?", key="range_check")
-    if st.session_state["range_check"]:
-        today = datetime.datetime.now()
-        last_week = today - datetime.timedelta(days=7)
-        date_range = st.date_input(
-            "Select range of trades to analyze",
-            (last_week, today),
-            max_value=today,
-            format="MM.DD.YYYY",
-        )
+    if date_range and len(date_range) == 2:
+        start_date, end_date = date_range
+        if start_date > end_date:
+            st.warning("Start date cannot be after end date.")
+            st.stop()
 
-    if st.session_state["range_check"]:
-        trades = get_trades_for_range_pandas(
-            market.symbol, date_range[0], date_range[1]
-        )
+        with st.status(
+            f"Fetching trade data for {market['symbol']} ({start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')})...",
+            expanded=True,
+        ) as status:
+            trades = await get_trades_for_range_pandas(
+                market["symbol"], start_date, end_date, status_container=status
+            )
+            status.update(label="Trade data fetched!", state="complete", expanded=False)
+
+        if trades.empty:
+            st.warning(
+                f"No trade data found for {market['symbol']} between {start_date.strftime('%Y-%m-%d')} and {end_date.strftime('%Y-%m-%d')}."
+            )
+            st.stop()  # Stop execution if no data
+
         fee_tiers = get_fee_tier_trades(trades)
 
         tier_configs = [
@@ -200,21 +249,9 @@ async def fee_income_page(ch: DriftClient):
         for col, (tier_name, tier_key) in zip(cols, tier_configs):
             with col:
                 display_fee_tier_metrics(fee_tiers[tier_key], tier_name)
-
     else:
-        trades = get_trades_for_day_pandas(market["symbol"], day)
-        fee_tiers = get_fee_tier_trades(trades)
-
-        tier_configs = [
-            ("High Leverage Trades (> 2.5 bps)", "high_leverage"),
-            ("Tier 1 Trades (2.5 bps)", "tier_1"),
-            ("Tier 2-4 Trades (0.75 bps < x < 2.5 bps)", "tier_2_4"),
-            ("VIP Trades (0.75 bps)", "vip"),
-        ]
-        cols = st.columns(4)
-        for col, (tier_name, tier_key) in zip(cols, tier_configs):
-            with col:
-                display_fee_tier_metrics(fee_tiers[tier_key], tier_name)
+        st.info("Please select a valid date range.")
+        st.stop()
 
     with st.expander("Show Fee Tier Trades"):
         tab1, tab2, tab3, tab4, tab5 = st.tabs(
