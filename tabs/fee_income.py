@@ -235,10 +235,8 @@ async def fee_income_page(ch: DriftClient):
             st.warning(
                 f"No trade data found for {market['symbol']} between {start_date.strftime('%Y-%m-%d')} and {end_date.strftime('%Y-%m-%d')}."
             )
-            st.stop()  # Stop execution if no data
-
+            st.stop()
         fee_tiers = get_fee_tier_trades(trades)
-
         tier_configs = [
             ("High Leverage Trades (> 2.5 bps)", "high_leverage"),
             ("Tier 1 Trades (2.5 bps)", "tier_1"),
@@ -249,94 +247,100 @@ async def fee_income_page(ch: DriftClient):
         for col, (tier_name, tier_key) in zip(cols, tier_configs):
             with col:
                 display_fee_tier_metrics(fee_tiers[tier_key], tier_name)
+
+        with st.spinner("Preparing detailed trade views..."):
+            with st.expander("Show Fee Tier Trades"):
+                tab1, tab2, tab3, tab4, tab5 = st.tabs(
+                    ["High Leverage", "Tier 1", "Tier 2-4", "VIP", "Other Small"]
+                )
+
+                with tab1:
+                    st.dataframe(
+                        fee_tiers["high_leverage"],
+                        column_config={
+                            "fee_ratio": st.column_config.NumberColumn(format="%.6f")
+                        },
+                    )
+                with tab2:
+                    st.dataframe(
+                        fee_tiers["tier_1"],
+                        column_config={
+                            "fee_ratio": st.column_config.NumberColumn(format="%.6f")
+                        },
+                    )
+                with tab3:
+                    st.dataframe(
+                        fee_tiers["tier_2_4"],
+                        column_config={
+                            "fee_ratio": st.column_config.NumberColumn(format="%.6f")
+                        },
+                    )
+                with tab4:
+                    st.dataframe(
+                        fee_tiers["vip"],
+                        column_config={
+                            "fee_ratio": st.column_config.NumberColumn(format="%.7f")
+                        },
+                    )
+                with tab5:
+                    st.dataframe(
+                        fee_tiers["other_small"],
+                        column_config={
+                            "fee_ratio": st.column_config.NumberColumn(format="%.7f")
+                        },
+                    )
+
+            with st.expander("Show takers per fee tier"):
+                tab1, tab2, tab3, tab4, tab5 = st.tabs(
+                    ["High Leverage", "Tier 1", "Tier 2-4", "VIP", "Other Small"]
+                )
+
+                with tab1:
+                    st.write(
+                        f"There are {len(fee_tiers['high_leverage']['taker'].unique())} unique high leverage takers"
+                    )
+                    st.dataframe(fee_tiers["high_leverage"]["taker"].value_counts())
+                with tab2:
+                    st.write(
+                        f"There are {len(fee_tiers['tier_1']['taker'].unique())} unique tier 1 takers"
+                    )
+                    st.dataframe(fee_tiers["tier_1"]["taker"].value_counts())
+                with tab3:
+                    st.write(
+                        f"There are {len(fee_tiers['tier_2_4']['taker'].unique())} unique tier 2-4 takers"
+                    )
+                    st.dataframe(fee_tiers["tier_2_4"]["taker"].value_counts())
+                with tab4:
+                    st.write(
+                        f"There are {len(fee_tiers['vip']['taker'].unique())} unique VIP takers"
+                    )
+                    st.dataframe(fee_tiers["vip"]["taker"].value_counts())
+                with tab5:
+                    st.write(
+                        f"There are {len(fee_tiers['other_small']['taker'].unique())} unique other small takers"
+                    )
+                    st.dataframe(fee_tiers["other_small"]["taker"].value_counts())
+
+            st.write("---")
+            cols = st.columns(3)
+            with cols[0]:
+                st.metric("All trades", len(trades))
+                from_summary(summarize_trading_data(trades))
+            with cols[1]:
+                trades_just_liquidations = trades[
+                    trades["actionExplanation"] == "liquidation"
+                ]
+                st.metric("Liquidations only", len(trades_just_liquidations))
+                from_summary(summarize_trading_data(trades_just_liquidations))
+            with cols[2]:
+                all_trades_minus_liquidations = trades[
+                    trades["actionExplanation"] != "liquidation"
+                ]
+                st.metric(
+                    "All trades minus liquidations", len(all_trades_minus_liquidations)
+                )
+                from_summary(summarize_trading_data(all_trades_minus_liquidations))
+
     else:
         st.info("Please select a valid date range.")
         st.stop()
-
-    with st.expander("Show Fee Tier Trades"):
-        tab1, tab2, tab3, tab4, tab5 = st.tabs(
-            ["High Leverage", "Tier 1", "Tier 2-4", "VIP", "Other Small"]
-        )
-
-        with tab1:
-            st.dataframe(
-                fee_tiers["high_leverage"],
-                column_config={
-                    "fee_ratio": st.column_config.NumberColumn(format="%.6f")
-                },
-            )
-        with tab2:
-            st.dataframe(
-                fee_tiers["tier_1"],
-                column_config={
-                    "fee_ratio": st.column_config.NumberColumn(format="%.6f")
-                },
-            )
-        with tab3:
-            st.dataframe(
-                fee_tiers["tier_2_4"],
-                column_config={
-                    "fee_ratio": st.column_config.NumberColumn(format="%.6f")
-                },
-            )
-        with tab4:
-            st.dataframe(
-                fee_tiers["vip"],
-                column_config={
-                    "fee_ratio": st.column_config.NumberColumn(format="%.7f")
-                },
-            )
-        with tab5:
-            st.dataframe(
-                fee_tiers["other_small"],
-                column_config={
-                    "fee_ratio": st.column_config.NumberColumn(format="%.7f")
-                },
-            )
-
-    with st.expander("Show takers per fee tier"):
-        tab1, tab2, tab3, tab4, tab5 = st.tabs(
-            ["High Leverage", "Tier 1", "Tier 2-4", "VIP", "Other Small"]
-        )
-
-        with tab1:
-            st.write(
-                f"There are {len(fee_tiers['high_leverage']['taker'].unique())} unique high leverage takers"
-            )
-            st.dataframe(fee_tiers["high_leverage"]["taker"].value_counts())
-        with tab2:
-            st.write(
-                f"There are {len(fee_tiers['tier_1']['taker'].unique())} unique tier 1 takers"
-            )
-            st.dataframe(fee_tiers["tier_1"]["taker"].value_counts())
-        with tab3:
-            st.write(
-                f"There are {len(fee_tiers['tier_2_4']['taker'].unique())} unique tier 2-4 takers"
-            )
-            st.dataframe(fee_tiers["tier_2_4"]["taker"].value_counts())
-        with tab4:
-            st.write(
-                f"There are {len(fee_tiers['vip']['taker'].unique())} unique VIP takers"
-            )
-            st.dataframe(fee_tiers["vip"]["taker"].value_counts())
-        with tab5:
-            st.write(
-                f"There are {len(fee_tiers['other_small']['taker'].unique())} unique other small takers"
-            )
-            st.dataframe(fee_tiers["other_small"]["taker"].value_counts())
-
-    st.write("---")
-    cols = st.columns(3)
-    with cols[0]:
-        st.metric("All trades", len(trades))
-        from_summary(summarize_trading_data(trades))
-    with cols[1]:
-        trades_just_liquidations = trades[trades["actionExplanation"] == "liquidation"]
-        st.metric("Liquidations only", len(trades_just_liquidations))
-        from_summary(summarize_trading_data(trades_just_liquidations))
-    with cols[2]:
-        all_trades_minus_liquidations = trades[
-            trades["actionExplanation"] != "liquidation"
-        ]
-        st.metric("All trades minus liquidations", len(all_trades_minus_liquidations))
-        from_summary(summarize_trading_data(all_trades_minus_liquidations))
