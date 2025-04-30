@@ -45,6 +45,8 @@ from tabs.userstatus import userstatus_page
 from tabs.uservolume import show_user_volume
 from tabs.vamm import vamm
 from tabs.vaults import vaults
+from tabs.amplify_stats import show_amplify_stats  
+
 
 # import ssl
 # import urllib.request
@@ -119,6 +121,7 @@ def main():
         "Backtester",
         "MM (legacy)",
         "Liquidation Calculator",
+        "Amplify Stats",
     )
 
     to_remove = [
@@ -354,6 +357,9 @@ def main():
         except ImportError:
             print("backtester not found")
             pass
+    elif tab.lower() == "amplify stats":
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(show_amplify_stats(clearing_house))
     hide_streamlit_style = """
             <style>
             #MainMenu {visibility: hidden;}
