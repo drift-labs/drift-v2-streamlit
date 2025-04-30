@@ -3,8 +3,6 @@ import streamlit as st
 from driftpy.drift_client import DriftClient  
 from solders.pubkey import Pubkey # type: ignore
 from solana.rpc.types import MemcmpOpts
-import base64
-import base58
   
 async def show_amplify_stats(drift_client: DriftClient):  
     st.title("Amplify JLP/USDC Accounts Statistics")  
