@@ -1,26 +1,34 @@
 import pandas as pd  
 import streamlit as st  
+import base58
 from driftpy.drift_client import DriftClient  
 from solders.pubkey import Pubkey # type: ignore
 from solana.rpc.types import MemcmpOpts
+
+# Define the search term in plain text for better readability
+ACCOUNT_NAME_SEARCH_TERM = "Amplify"
   
 async def show_amplify_stats(drift_client: DriftClient):  
-    st.title("Amplify JLP/USDC Accounts Statistics")  
+    st.title("Amplify Accounts Statistics")  
     
     try:  
         with st.spinner("Fetching Amplify accounts..."):
             # First verify the RPC endpoint is working and then fetch user accounts
-            st.toast("Fetching Amplify JLP/USDC accounts...")
+            st.toast("Fetching Amplify accounts...")
+            
+            # Convert the search term to base58 for account filtering
+            encoded_name = ACCOUNT_NAME_SEARCH_TERM.encode("utf-8")
+            encoded_name_b58 = base58.b58encode(encoded_name).decode("utf-8")
             
             # This is the correct User discriminator used in other parts of the codebase
             users = await drift_client.program.account["User"].all(
                 filters=[
-                    MemcmpOpts(offset=72, bytes="95benutL2JUzVbMWVezYug") # Amplify JLP/USDC base58 encoded account name
+                    MemcmpOpts(offset=72, bytes=encoded_name_b58) # Dynamically encoded account name
                 ]
             )
           
         if not users:  
-            st.warning("No Amplify JLP/USDC accounts found")  
+            st.warning("No Amplify accounts found")  
             return  
           
         # Process the accounts data  
