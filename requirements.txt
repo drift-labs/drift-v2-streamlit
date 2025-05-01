@@ -1,5 +1,6 @@
 aiocache==0.11.1
 anchorpy==0.21.0
+base58==2.1.1
 ccxt
 driftpy>=0.8.43
 numpy==1.26.3
