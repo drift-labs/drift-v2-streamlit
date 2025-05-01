@@ -9,32 +9,15 @@ async def show_amplify_stats(drift_client: DriftClient):
     
     try:  
         with st.spinner("Fetching Amplify accounts..."):
-            # First verify the RPC endpoint is working and then fetch all user accounts
-            # Use the same discriminator as in userperf.py
-            st.info("Step 1: Fetching all User accounts with discriminator filter...")
+            # First verify the RPC endpoint is working and then fetch user accounts
+            st.toast("Fetching Amplify JLP/USDC accounts...")
             
             # This is the correct User discriminator used in other parts of the codebase
             users = await drift_client.program.account["User"].all(
                 filters=[
-                    MemcmpOpts(offset=0, bytes="TfwwBiNJtao")  # User discriminator from userperf.py
+                    MemcmpOpts(offset=72, bytes="95benutL2JUzVbMWVezYug") # Amplify JLP/USDC base58 encoded account name
                 ]
             )
-            
-            st.info(f"Found {len(users)} total user accounts")
-            
-            # Now search through user accounts to find ones with "Amplify JLP/USDC" in name
-            amplify_users = []
-            for user in users:
-                try:
-                    name = bytes(user.account.name).decode('utf-8', errors='ignore').strip('\x00')
-                    if "Amplify" in name and "JLP/USDC" in name:
-                        amplify_users.append(user)
-                except Exception as e:
-                    # Skip accounts with invalid name encoding
-                    continue
-                    
-            st.info(f"Found {len(amplify_users)} Amplify accounts out of {len(users)} total user accounts")
-            users = amplify_users
           
         if not users:  
             st.warning("No Amplify JLP/USDC accounts found")  
