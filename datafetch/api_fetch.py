@@ -98,7 +98,9 @@ def get_trades_for_day(market_symbol, year, month, day, page=1):
         if not df.empty:
             df["ts"] = pd.to_datetime(df["ts"], unit="s")
 
-        print(f"Retrieved {len(all_data)} records out of {meta.get('totalRecords', 'unknown')} total")
+        print(
+            f"Retrieved {len(all_data)} records out of {meta.get('totalRecords', 'unknown')} total"
+        )
         return df
 
     except requests.exceptions.RequestException as e:
@@ -106,4 +108,56 @@ def get_trades_for_day(market_symbol, year, month, day, page=1):
         return pd.DataFrame()
     except Exception as e:
         print(f"Unexpected error: {e}")
+        return pd.DataFrame()
+
+
+@cache_data(ttl=60 * 60 * 24)
+def get_user_trades_for_month(account_id, year, month, page=1):
+    """
+    Fetch trades for a specific account and month from the Drift API.
+
+    Args:
+        account_id (str): The user account ID
+        year (int): Year of the data
+        month (int): Month of the data
+        page (int, optional): Starting page number. Defaults to 1.
+
+    Returns:
+        pd.DataFrame: DataFrame containing trade data
+    """
+    url = f"{URL_PREFIX}/user/{account_id}/trades/{year}/{month:02d}"
+    print(f"Fetching user trades from: {url}")
+
+    try:
+        all_data = []
+        current_page = page
+
+        while True:
+            print(f"Fetching page {current_page}")
+            response = requests.get(url, params={"page": current_page})
+            response.raise_for_status()
+            json_data = response.json()
+            meta = json_data["meta"]
+            all_data.extend(json_data["records"])
+
+            if meta.get("nextPage") is None:
+                break
+
+            current_page = meta["nextPage"]
+            time.sleep(0.1)  # Be nice to the API
+
+        df = pd.DataFrame(all_data)
+        if not df.empty:
+            df["ts"] = pd.to_datetime(df["ts"], unit="s")
+
+        print(
+            f"Retrieved {len(all_data)} records for user {account_id} in {year}-{month:02d}"
+        )
+        return df
+
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching data for user {account_id}: {e}")
+        return pd.DataFrame()
+    except Exception as e:
+        print(f"Unexpected error for user {account_id}: {e}")
         return pd.DataFrame()
