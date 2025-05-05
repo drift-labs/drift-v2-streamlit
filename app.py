@@ -11,8 +11,10 @@ from driftpy.drift_client import AccountSubscriptionConfig, DriftClient
 from solana.rpc.async_api import AsyncClient
 from solders.keypair import Keypair
 
+from tabs.amplify_stats import show_amplify_stats
 from tabs.api import show_api
 from tabs.competition import competitions
+from tabs.counterparty_analysis import counterparty_analysis_page
 from tabs.dlp import dlp
 from tabs.fee_income import fee_income_page
 from tabs.fees import fee_page
@@ -45,8 +47,6 @@ from tabs.userstatus import userstatus_page
 from tabs.uservolume import show_user_volume
 from tabs.vamm import vamm
 from tabs.vaults import vaults
-from tabs.amplify_stats import show_amplify_stats  
-
 
 # import ssl
 # import urllib.request
@@ -93,6 +93,7 @@ def main():
         "Logs",
         "Fee-Income",
         "User-Performance",
+        "Counterparty Analysis",
         "Fee-Schedule",
         "Insurance-Fund",
         "Perp-LPs",
@@ -248,6 +249,10 @@ def main():
     elif tab.lower() == "user-performance":
         loop = asyncio.new_event_loop()
         loop.run_until_complete(show_user_perf(clearing_house))
+
+    elif tab.lower() == "counterparty analysis":
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(counterparty_analysis_page(clearing_house))
 
     elif tab.lower() == "refs":
         loop = asyncio.new_event_loop()
