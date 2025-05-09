@@ -117,49 +117,173 @@ def add_fee_ratio(df):
     return df
 
 
-def get_fee_tier_trades(trades):
+def get_fee_tier_trades(trades, market_symbol: str):
     """
-    Clusters trades into fee ratio groups:
-    - High leverage: > 2.5 bps (0.00025)
-    - Tier 1: = 2.5 bps
-    - Tier 2-4: 0.75 bps < x < 2.5 bps
-    - VIP: = 0.75 bps (0.0000075)
+    Clusters trades into fee ratio groups based on specified fee ratio ranges,
+    adjusting boundaries for specific markets.
+    Tiers (standard, before market adjustment):
+    - High Leverage: fr > 0.0010 (10 BPS)
+    - Tier 1: 0.0009 < fr <= 0.0010 (9-10 BPS)
+    - Tier 2: 0.0008 < fr <= 0.0009 (8-9 BPS)
+    - Tier 3: 0.0007 < fr <= 0.0008 (7-8 BPS)
+    - Tier 4: 0.0006 < fr <= 0.0007 (6-7 BPS)
+    - Tier 5: 0.0003 < fr <= 0.0006 (3-6 BPS)
+    - VIP:    0 < fr <= 0.0003 (0-3 BPS)
+    Returns a tuple: (tier_frames, histogram_bounds_bps, tier_display_configs_data, tab_titles_data).
     """
-    high_leverage = trades[
-        (trades["fee_ratio"] > 0.000251)
-        & (trades["actionExplanation"] != "liquidation")
-    ]
+    non_liq_trades = trades[trades["actionExplanation"] != "liquidation"].copy()
 
-    tier_1 = trades[
-        (trades["fee_ratio"] == 0.00025)
-        | (trades["fee_ratio"] == 0.000251)
-        & (trades["actionExplanation"] != "liquidation")
+    all_keys = [
+        "high_leverage",
+        "tier_1",
+        "tier_2",
+        "tier_3",
+        "tier_4",
+        "tier_5",
+        "vip",
+        "other",
     ]
-
-    tier_2_4 = trades[
-        (trades["fee_ratio"] > 0.0000751)
-        & (trades["fee_ratio"] < 0.000249)
-        & (trades["actionExplanation"] != "liquidation")
-    ]
-
-    vip = trades[
-        (trades["fee_ratio"] < 0.0000751)
-        & (trades["fee_ratio"] > 0.000071)
-        & (trades["actionExplanation"] != "liquidation")
-    ]
-
-    other_small = trades[
-        (trades["fee_ratio"] < 0.000071)
-        & (trades["actionExplanation"] != "liquidation")
-    ]
-
-    return {
-        "high_leverage": high_leverage,
-        "tier_1": tier_1,
-        "tier_2_4": tier_2_4,
-        "vip": vip,
-        "other_small": other_small,
+    tier_frames = {
+        key: pd.DataFrame(columns=non_liq_trades.columns) for key in all_keys
     }
+    standard_bounds = {
+        "tier1_upper": 0.0010 + 0.00005,
+        "tier2_upper": 0.0009 + 0.00005,
+        "tier3_upper": 0.0008 + 0.00005,
+        "tier4_upper": 0.0007 + 0.00005,
+        "tier5_upper": 0.0006 + 0.00005,
+        "vip_upper": 0.0003 + 0.00005,
+    }
+
+    special_markets = ["SOL-PERP", "ETH-PERP", "BTC-PERP"]
+    bounds_multiplier = 1.0
+    if market_symbol in special_markets:
+        bounds_multiplier = 0.25
+    current_bounds = {k: v * bounds_multiplier for k, v in standard_bounds.items()}
+
+    b = {k: v * 10000 for k, v in current_bounds.items()}
+
+    histogram_bounds_bps = {
+        "HL": b["tier1_upper"],
+        "T1": b["tier2_upper"],
+        "T2": b["tier3_upper"],
+        "T3": b["tier4_upper"],
+        "T4": b["tier5_upper"],
+        "VIP": b["vip_upper"],
+        "Other": 0.09,
+    }
+
+    tier_display_configs_data = [
+        (f"High Leverage (> {b['tier1_upper']:.2f} BPS)", "high_leverage"),
+        (f"Tier 1 ({b['tier2_upper']:.2f} - {b['tier1_upper']:.2f} BPS)", "tier_1"),
+        (f"Tier 2 ({b['tier3_upper']:.2f} - {b['tier2_upper']:.2f} BPS)", "tier_2"),
+        (f"Tier 3 ({b['tier4_upper']:.2f} - {b['tier3_upper']:.2f} BPS)", "tier_3"),
+        (f"Tier 4 ({b['tier5_upper']:.2f} - {b['tier4_upper']:.2f} BPS)", "tier_4"),
+        (f"Tier 5 ({b['vip_upper']:.2f} - {b['tier5_upper']:.2f} BPS)", "tier_5"),
+        (f"VIP Trades (0 - {b['vip_upper']:.2f} BPS & >0)", "vip"),
+        (
+            "Other Non-Liquidation Trades",
+            "other",
+        ),
+    ]
+    tab_titles_data = [
+        f"HL (>{b['tier1_upper']:.2f} BPS)",
+        f"T1 ({b['tier2_upper']:.2f}-{b['tier1_upper']:.2f} BPS)",
+        f"T2 ({b['tier3_upper']:.2f}-{b['tier2_upper']:.2f} BPS)",
+        f"T3 ({b['tier4_upper']:.2f}-{b['tier3_upper']:.2f} BPS)",
+        f"T4 ({b['tier5_upper']:.2f}-{b['tier4_upper']:.2f} BPS)",
+        f"T5 ({b['vip_upper']:.2f}-{b['tier5_upper']:.2f} BPS)",
+        f"VIP (0-{b['vip_upper']:.2f} BPS)",
+        "Other",
+    ]
+
+    if non_liq_trades.empty:
+        return (
+            tier_frames,
+            histogram_bounds_bps,
+            tier_display_configs_data,
+            tab_titles_data,
+        )
+
+    remaining_df = non_liq_trades.copy()
+
+    tier_frames["high_leverage"] = remaining_df[
+        remaining_df["fee_ratio"] > current_bounds["tier1_upper"]
+    ]
+    remaining_df = remaining_df[
+        ~(remaining_df["fee_ratio"] > current_bounds["tier1_upper"])
+    ]
+
+    tier_frames["tier_1"] = remaining_df[
+        (remaining_df["fee_ratio"] > current_bounds["tier2_upper"])
+        & (remaining_df["fee_ratio"] <= current_bounds["tier1_upper"])
+    ]
+    remaining_df = remaining_df[
+        ~(
+            (remaining_df["fee_ratio"] > current_bounds["tier2_upper"])
+            & (remaining_df["fee_ratio"] <= current_bounds["tier1_upper"])
+        )
+    ]
+
+    tier_frames["tier_2"] = remaining_df[
+        (remaining_df["fee_ratio"] > current_bounds["tier3_upper"])
+        & (remaining_df["fee_ratio"] <= current_bounds["tier2_upper"])
+    ]
+    remaining_df = remaining_df[
+        ~(
+            (remaining_df["fee_ratio"] > current_bounds["tier3_upper"])
+            & (remaining_df["fee_ratio"] <= current_bounds["tier2_upper"])
+        )
+    ]
+
+    tier_frames["tier_3"] = remaining_df[
+        (remaining_df["fee_ratio"] > current_bounds["tier4_upper"])
+        & (remaining_df["fee_ratio"] <= current_bounds["tier3_upper"])
+    ]
+    remaining_df = remaining_df[
+        ~(
+            (remaining_df["fee_ratio"] > current_bounds["tier4_upper"])
+            & (remaining_df["fee_ratio"] <= current_bounds["tier3_upper"])
+        )
+    ]
+
+    tier_frames["tier_4"] = remaining_df[
+        (remaining_df["fee_ratio"] > current_bounds["tier5_upper"])
+        & (remaining_df["fee_ratio"] <= current_bounds["tier4_upper"])
+    ]
+    remaining_df = remaining_df[
+        ~(
+            (remaining_df["fee_ratio"] > current_bounds["tier5_upper"])
+            & (remaining_df["fee_ratio"] <= current_bounds["tier4_upper"])
+        )
+    ]
+
+    tier_frames["tier_5"] = remaining_df[
+        (remaining_df["fee_ratio"] > current_bounds["vip_upper"])
+        & (remaining_df["fee_ratio"] <= current_bounds["tier5_upper"])
+    ]
+    remaining_df = remaining_df[
+        ~(
+            (remaining_df["fee_ratio"] > current_bounds["vip_upper"])
+            & (remaining_df["fee_ratio"] <= current_bounds["tier5_upper"])
+        )
+    ]
+
+    tier_frames["vip"] = remaining_df[
+        (remaining_df["fee_ratio"] > 0)
+        & (remaining_df["fee_ratio"] <= current_bounds["vip_upper"])
+    ]
+    remaining_df = remaining_df[
+        ~(
+            (remaining_df["fee_ratio"] > 0)
+            & (remaining_df["fee_ratio"] <= current_bounds["vip_upper"])
+        )
+    ]
+
+    # 'Other' tier captures non-liquidation trades with zero fee_ratio not caught by other tiers
+    tier_frames["other"] = remaining_df[remaining_df["fee_ratio"] == 0]
+
+    return tier_frames, histogram_bounds_bps, tier_display_configs_data, tab_titles_data
 
 
 def summarize_trading_data(trades):
@@ -197,15 +321,27 @@ def display_fee_tier_metrics(fee_tier_data, tier_name):
 
 
 async def fee_income_page(ch: DriftClient):
+    market_options = [
+        {"market_index": c.market_index, "symbol": c.symbol}
+        for c in mainnet_perp_market_configs
+    ]
+
+    if not market_options:
+        st.warning("No markets available for selection.")
+        st.stop()
+
     market = st.selectbox(
         "Select market",
-        options=[
-            {"market_index": c.market_index, "symbol": c.symbol}
-            for c in mainnet_perp_market_configs
-        ],
+        options=market_options,
         index=0,
         format_func=lambda x: f"({x['market_index']}) {x['symbol']}",
     )
+
+    special_markets = ["SOL-PERP", "ETH-PERP", "BTC-PERP"]
+    if market["symbol"] in special_markets:
+        st.info(
+            f"Note: Fee tiers for {market['symbol']} are adjusted (75% lower than standard)."
+        )
 
     today = datetime.datetime.now()
     date_range = st.date_input(
@@ -236,103 +372,124 @@ async def fee_income_page(ch: DriftClient):
                 f"No trade data found for {market['symbol']} between {start_date.strftime('%Y-%m-%d')} and {end_date.strftime('%Y-%m-%d')}."
             )
             st.stop()
-        fee_tiers = get_fee_tier_trades(trades)
-        tier_configs = [
-            ("High Leverage Trades (> 2.5 bps)", "high_leverage"),
-            ("Tier 1 Trades (2.5 bps)", "tier_1"),
-            ("Tier 2-4 Trades (0.75 bps < x < 2.5 bps)", "tier_2_4"),
-            ("VIP Trades (0.75 bps)", "vip"),
-        ]
-        cols = st.columns(4)
-        for col, (tier_name, tier_key) in zip(cols, tier_configs):
-            with col:
-                display_fee_tier_metrics(fee_tiers[tier_key], tier_name)
+
+        fee_tiers, histogram_bounds_bps, tier_display_configs, tab_titles = (
+            get_fee_tier_trades(trades, market["symbol"])
+        )
+
+        st.subheader("Fee Ratio Distribution (Excluding Liquidations)")
+        non_liquidation_trades = trades[trades["actionExplanation"] != "liquidation"]
+        if (
+            not non_liquidation_trades.empty
+            and "fee_ratio" in non_liquidation_trades.columns
+        ):
+            bins = 200
+            with st.expander("Adjust graph", expanded=False):
+                bins = st.slider(
+                    "Number of bins", min_value=100, max_value=300, value=200
+                )
+            try:
+                fee_ratio_bps = non_liquidation_trades["fee_ratio"] * 10000
+                fig_dist = fee_ratio_bps.plot(
+                    kind="hist",
+                    title="Distribution of Taker Fee Ratios (BPS)",
+                    labels={"value": "Fee Ratio (BPS)", "count": "Number of Trades"},
+                    nbins=bins,
+                )
+                fig_dist.update_layout(yaxis_type="log")
+
+                tier_thresholds_bps = histogram_bounds_bps
+
+                line_colors = [
+                    "red",
+                    "orange",
+                    "gold",
+                    "green",
+                    "blue",
+                    "purple",
+                ]
+                color_idx = 0
+                for label, threshold_bps in tier_thresholds_bps.items():
+                    fig_dist.add_vline(
+                        x=threshold_bps,
+                        line_width=2,
+                        line_dash="dash",
+                        line_color=line_colors[color_idx % len(line_colors)],
+                        annotation_text=f"{label}",
+                        annotation_position="top right",
+                    )
+                    color_idx += 1
+
+                st.plotly_chart(fig_dist, use_container_width=True)
+            except Exception as e:
+                st.error(f"Could not generate fee ratio distribution plot: {e}")
+        elif non_liquidation_trades.empty:
+            st.info("No non-liquidation trades to display fee ratio distribution.")
+        else:
+            st.warning("'fee_ratio' column not found, cannot display distribution.")
+
+        st.write("---")
+
+        with st.expander("Fee Tier Summary Statistics", expanded=True):
+            num_metrics = len(tier_display_configs)
+            metrics_per_row = 3
+            for i in range(0, num_metrics, metrics_per_row):
+                num_cols_for_this_row = min(metrics_per_row, num_metrics - i)
+                cols = st.columns(num_cols_for_this_row)
+
+                for j in range(num_cols_for_this_row):
+                    if (i + j) < num_metrics:
+                        tier_name_template, tier_key = tier_display_configs[i + j]
+                        with cols[j]:
+                            display_fee_tier_metrics(
+                                fee_tiers[tier_key], tier_name_template
+                            )
 
         with st.spinner("Preparing detailed trade views..."):
             with st.expander("Show Fee Tier Trades"):
-                tab1, tab2, tab3, tab4, tab5 = st.tabs(
-                    ["High Leverage", "Tier 1", "Tier 2-4", "VIP", "Other Small"]
-                )
-
-                with tab1:
-                    st.dataframe(
-                        fee_tiers["high_leverage"],
-                        column_config={
-                            "fee_ratio": st.column_config.NumberColumn(format="%.6f")
-                        },
-                    )
-                with tab2:
-                    st.dataframe(
-                        fee_tiers["tier_1"],
-                        column_config={
-                            "fee_ratio": st.column_config.NumberColumn(format="%.6f")
-                        },
-                    )
-                with tab3:
-                    st.dataframe(
-                        fee_tiers["tier_2_4"],
-                        column_config={
-                            "fee_ratio": st.column_config.NumberColumn(format="%.6f")
-                        },
-                    )
-                with tab4:
-                    st.dataframe(
-                        fee_tiers["vip"],
-                        column_config={
-                            "fee_ratio": st.column_config.NumberColumn(format="%.7f")
-                        },
-                    )
-                with tab5:
-                    st.dataframe(
-                        fee_tiers["other_small"],
-                        column_config={
-                            "fee_ratio": st.column_config.NumberColumn(format="%.7f")
-                        },
-                    )
+                created_tabs = st.tabs(tab_titles)
+                for i, tier_key_data in enumerate(tier_display_configs):
+                    tier_key = tier_key_data[1]
+                    with created_tabs[i]:
+                        st.dataframe(
+                            fee_tiers[tier_key],
+                            column_config={
+                                "fee_ratio": st.column_config.NumberColumn(
+                                    format="%.6f"
+                                )
+                            },
+                        )
 
             with st.expander("Show takers per fee tier"):
-                tab1, tab2, tab3, tab4, tab5 = st.tabs(
-                    ["High Leverage", "Tier 1", "Tier 2-4", "VIP", "Other Small"]
-                )
-
-                with tab1:
-                    st.write(
-                        f"There are {len(fee_tiers['high_leverage']['taker'].unique())} unique high leverage takers"
-                    )
-                    st.dataframe(fee_tiers["high_leverage"]["taker"].value_counts())
-                with tab2:
-                    st.write(
-                        f"There are {len(fee_tiers['tier_1']['taker'].unique())} unique tier 1 takers"
-                    )
-                    st.dataframe(fee_tiers["tier_1"]["taker"].value_counts())
-                with tab3:
-                    st.write(
-                        f"There are {len(fee_tiers['tier_2_4']['taker'].unique())} unique tier 2-4 takers"
-                    )
-                    st.dataframe(fee_tiers["tier_2_4"]["taker"].value_counts())
-                with tab4:
-                    st.write(
-                        f"There are {len(fee_tiers['vip']['taker'].unique())} unique VIP takers"
-                    )
-                    st.dataframe(fee_tiers["vip"]["taker"].value_counts())
-                with tab5:
-                    st.write(
-                        f"There are {len(fee_tiers['other_small']['taker'].unique())} unique other small takers"
-                    )
-                    st.dataframe(fee_tiers["other_small"]["taker"].value_counts())
+                created_tabs_takers = st.tabs(tab_titles)
+                for i, tier_key_data in enumerate(tier_display_configs):
+                    tier_key = tier_key_data[1]
+                    with created_tabs_takers[i]:
+                        unique_takers = (
+                            fee_tiers[tier_key]["taker"].unique()
+                            if not fee_tiers[tier_key].empty
+                            else []
+                        )
+                        st.write(
+                            f"There are {len(unique_takers)} unique takers in {tab_titles[i]}"
+                        )
+                        if not fee_tiers[tier_key].empty:
+                            st.dataframe(fee_tiers[tier_key]["taker"].value_counts())
+                        else:
+                            st.write("No takers in this tier.")
 
             st.write("---")
-            cols = st.columns(3)
-            with cols[0]:
+            cols_summary = st.columns(3)
+            with cols_summary[0]:
                 st.metric("All trades", len(trades))
                 from_summary(summarize_trading_data(trades))
-            with cols[1]:
+            with cols_summary[1]:
                 trades_just_liquidations = trades[
                     trades["actionExplanation"] == "liquidation"
                 ]
                 st.metric("Liquidations only", len(trades_just_liquidations))
                 from_summary(summarize_trading_data(trades_just_liquidations))
-            with cols[2]:
+            with cols_summary[2]:
                 all_trades_minus_liquidations = trades[
                     trades["actionExplanation"] != "liquidation"
                 ]
