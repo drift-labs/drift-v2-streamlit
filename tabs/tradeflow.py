@@ -148,7 +148,7 @@ async def trade_flow_analysis(clearinghouse: DriftClient):
 
     modecol, col1, col2 = st.columns([2, 3, 3])
     selection = modecol.radio("mode:", ["summary", "per-market"], index=1)
-    data_source = modecol.radio("data source:", ["api", "s3"], index=0)
+    data_source = "api"
 
     perp_markets = [m.symbol for m in mainnet_perp_market_configs]
     spot_markets = [m.symbol for m in mainnet_spot_market_configs]
@@ -546,16 +546,37 @@ async def trade_flow_analysis(clearinghouse: DriftClient):
         show_analysis_tables("bot " + user_type + "s:", true_bot_takers, user_type)
 
     else:
-        vamm_maker_trades = solperp[solperp["maker"].isnull()]
-        print(
-            f"Found {len(vamm_maker_trades)} vAMM trades out of {len(solperp)} total trades"
-        )
         s1, s2, s3 = st.columns(3)
         unit = s1.radio("unit:", ["$", "Price"], horizontal=True)
         field = s2.radio(
             "fields", ["execOnly", "timeOnly", "all"], index=2, horizontal=True
         )
         bdown = s3.radio("breakdown:", ["by action", "all"], index=1, horizontal=True)
+
+        vamm_role = st.radio(
+            "vAMM Role:",
+            ["vAMM as Maker", "vAMM as Taker", "vAMM (Any Role)"],
+            index=2,
+            horizontal=True,
+        )
+
+        if vamm_role == "vAMM as Maker":
+            vamm_maker_trades = solperp[
+                (solperp["maker"].isnull()) | (solperp["maker"] == "")
+            ]
+        elif vamm_role == "vAMM as Taker":
+            vamm_maker_trades = solperp[
+                (solperp["taker"].isnull()) | (solperp["taker"] == "")
+            ]
+        else:  # vAMM (Any Role)
+            vamm_maker_trades = solperp[
+                ((solperp["maker"].isnull()) | (solperp["maker"] == ""))
+                | ((solperp["taker"].isnull()) | (solperp["taker"] == ""))
+            ]
+
+        print(
+            f"Found {len(vamm_maker_trades)} vAMM trades out of {len(solperp)} total trades based on role: {vamm_role}"
+        )
 
         if unit == "$" and field == "all":
             vamm_maker_trades["ff"] = vamm_maker_trades["takerPremiumNextMinuteDollar"]
@@ -589,15 +610,10 @@ async def trade_flow_analysis(clearinghouse: DriftClient):
             st.write(vamm_maker_trades)
         with tabs[0]:
             fig = None
-            vamm_maker_trades.index = pd.to_datetime(
-                (vamm_maker_trades.index.astype(str).astype(float) * 1e9).astype(int)
-            )
             if bdown == "by action":
                 vamm_maker_trades = vamm_maker_trades.pivot_table(
                     index="ts", columns="actionExplanation", values="ff", aggfunc="sum"
                 )
-                # st.write(vamm_maker_trades)
-                # vamm_maker_trades['Markout'] = -(vamm_maker_trades['takerPremium'] - vamm_maker_trades['takerPremiumNextMinute'])
                 fig = (-vamm_maker_trades.fillna(0).cumsum()).plot()
             else:
                 fig = (-vamm_maker_trades["ff"].cumsum()).plot()
