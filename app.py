@@ -32,6 +32,7 @@ from tabs.overview_markets import show_overview_markets
 from tabs.perpLP import perp_lp_page
 from tabs.pid import show_pid_positions
 from tabs.post_trade_analysis import post_trade_analysis
+from tabs.auction_latency import auction_latency
 from tabs.maker_tx_landing_analysis import maker_tx_landing_analysis
 from tabs.refs import ref_page
 from tabs.simulations import sim_page
@@ -125,6 +126,7 @@ def main():
         "MM (legacy)",
         "Liquidation Calculator",
         "Amplify Stats",
+        "Auction Latency",
     )
 
     to_remove = [
@@ -305,6 +307,9 @@ def main():
     elif tab.lower() == "maker tx landing analysis":
         loop = asyncio.new_event_loop()
         loop.run_until_complete(maker_tx_landing_analysis(clearing_house))
+    elif tab.lower() == "auction latency":
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(auction_latency(clearing_house))
     elif tab.lower() == "imf":
         loop = asyncio.new_event_loop()
         loop.run_until_complete(imf_page(clearing_house))
