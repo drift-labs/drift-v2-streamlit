@@ -1,7 +1,7 @@
 import os
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from typing import List
+from typing import List, Optional
 
 from datafetch.api_fetch import get_trades_for_day
 
@@ -18,6 +18,10 @@ import requests
 from driftpy.drift_client import (
 	DriftClient,
 )
+
+import time
+import timeit
+from solders.signature import Signature
 
 
 # set pandas width and max columns
@@ -599,7 +603,64 @@ def plot_cumulative_pnl_for_user_account(user_trades_df, filter_ua):
 		st.plotly_chart(fig_methods, use_container_width=True)
 
 
-async def post_trade_analysis(clearinghouse: DriftClient):
+'''
+resp from jito:
+[
+  {
+    "bundle_id": "0ab6f798a0f85945b69b55f1b88573df58711af7f25d2a34edfab47e46153d7c"
+  }
+]
+'''
+def get_jito_bundle_id(tx_sig: str) -> Optional[str]:
+	try:
+		url = f"https://bundles.jito.wtf/api/v1/bundles/transaction/{tx_sig}"
+		response = requests.get(url)
+		data = response.json()
+		if 'error' in data:
+			return None
+		if len(data) > 0:
+			return data[0]['bundle_id']
+	except Exception as e:
+		st.error(f"Error getting jito bundle id: {e}")
+		return None
+
+
+'''
+resp from jito:
+[
+  {
+    "bundleId": "e2c30cc1cd9c3ed11dcd23ee0123ee801654f2782541886aa1f5c50b537aa298",
+    "slot": 340282457,
+    "validator": "CW9C7HBwAMgqNdXkNgFg9Ujr3edR2Ab9ymEuQnVacd1A",
+    "tippers": [
+      "5GMbJEjRJvQNiGRJzKud3ncTw11Efumpa6VQTJeGogbP"
+    ],
+    "landedTipLamports": 10000,
+    "landedCu": 274241,
+    "blockIndex": 1617,
+    "timestamp": "2025-05-15T23:59:59+00:00",
+    "txSignatures": [
+      "57BxAwFoPV6MPk3P2kkj3zXL6SJXwxzYBcUb5vv2vtGmH5HgdhDVHL7cxNtgeerGy35ZR5zDhAS7Y7hQ8mFCkac"
+    ]
+  }
+]
+'''
+def get_jito_bundle_data(bundle_id: str) -> Optional[dict]:
+	try:
+		url = f"https://bundles.jito.wtf/api/v1/bundles/bundle/{bundle_id}"
+		response = requests.get(url)
+		data = response.json()
+		if 'error' in data:
+			return None
+		if len(data) > 0:
+			return data[0]
+		return None
+	except Exception as e:
+		st.error(f"Error getting jito bundle data: {e}")
+		return None
+
+
+async def maker_tx_landing_analysis(clearinghouse: DriftClient):
 	cols = st.columns(2)
 	with cols[0]:
 		date_picker = st.date_input("Select a date")
@@ -626,99 +687,174 @@ async def post_trade_analysis(clearinghouse: DriftClient):
 			except Exception as e:
 				st.error(f"Error loading {market_symbol} trades for {date_picker} from s3, try a different date: {e}")
 				return
+		market_trades_df = market_trades_df.sort_values(by='ts', ascending=False)
+		all_tx_sigs = market_trades_df['txSig'].unique()
+		st.write(f"Total unique transactions for the day: {len(all_tx_sigs)}")
 
-		processed_trades_df = process_trades_df(market_trades_df)
+		cols_batch = st.columns(2)
+		with cols_batch[0]:
+			batch_size = st.number_input("Number of transactions to process (Batch Size)", min_value=1, max_value=len(all_tx_sigs), value=min(50, len(all_tx_sigs)), step=10)
+		with cols_batch[1]:
+			offset = st.number_input("Transaction offset", min_value=0, max_value=len(all_tx_sigs) - batch_size, value=0, step=10)
 
-		# Extract unique user accounts from the data
-		unique_makers = set(market_trades_df['maker'].dropna().unique())
-		unique_takers = set(market_trades_df['taker'].dropna().unique())
-		unique_accounts = list(unique_makers.union(unique_takers)) + ['vAMM']
+		tx_sigs_to_process = all_tx_sigs[offset : offset + batch_size]
 
-		# Let user select from the accounts found in the data
-		filtered_uas = st.multiselect("Select user accounts", unique_accounts)
+		if not tx_sigs_to_process.size:
+			st.warning("No transactions selected with the current offset and batch size.")
+			return
+		
+		st.write(f"Processing {len(tx_sigs_to_process)} transactions from offset {offset} (most recent first).")
 
-		for filtered_ua in filtered_uas:
-			st.write(f"# User Account: {filtered_ua}")
-			users_trades = render_trades_stats_for_user_account(processed_trades_df, filtered_ua)
+		connection = clearinghouse.program.provider.connection
 
-			# Create columns for filter and distribution
-			filter_col, dist_col, action_col= st.columns([1, 1, 1])
+		tx_done = 0
+		total_txs_in_batch = len(tx_sigs_to_process)
+		progress_bar = st.progress(0)
+		status_text = st.empty()
+		start_total_time = timeit.default_timer()
 
-			with filter_col:
-				# Add actionExplanation filter
-				action_explanations = users_trades['actionExplanation'].unique()
-				selected_action = st.radio("Filter by Action", ['All'] + list(action_explanations), key=f"action_{filtered_ua}")
-				if selected_action != 'All':
-					users_trades = users_trades[users_trades['actionExplanation'] == selected_action]
+		for tx_sig in tx_sigs_to_process:
+			start_iter_time = timeit.default_timer()
+			# st.write(tx_sig)
+			tx = await connection.get_transaction(Signature.from_string(tx_sig), 'json', None, 0)
+			# st.json(tx.to_json(), expanded=False)
 
-			# Calculate distribution of quote values by action
-			action_quotes = users_trades.groupby('actionExplanation')['user_quote'].apply(lambda x: abs(x).sum()).reset_index()
-			action_quotes.columns = ['Action', 'Total Quote Value']
-			action_quotes['Total Quote %'] = action_quotes['Total Quote Value'] / action_quotes['Total Quote Value'].sum() * 100
+			market_trades_df.loc[market_trades_df['txSig'] == tx_sig, 'txFeePaid'] = tx.value.transaction.meta.fee
+			market_trades_df.loc[market_trades_df['txSig'] == tx_sig, 'txComputeUnitsConsumed'] = tx.value.transaction.meta.compute_units_consumed
+			# market_trades_df.loc[market_trades_df['txSig'] == tx_sig, 'txSigner'] = str(tx.value.transaction.transaction.account_keys[0])
 
-			with dist_col:
+			jito_bundle_id = get_jito_bundle_id(tx_sig)
+			market_trades_df.loc[market_trades_df['txSig'] == tx_sig, 'jitoBundleId'] = jito_bundle_id
 
-				# Create pie chart
-				fig_pie = go.Figure(data=[go.Pie(
-					labels=action_quotes['Action'],
-					values=action_quotes['Total Quote Value'],
-					hole=.3
-				)])
-				fig_pie.update_layout(
-					title="Distribution of Fill Volumeby Action",
-					height=300,
-					showlegend=True
-				)
-				st.plotly_chart(fig_pie, use_container_width=True)
+			# st.write(jito_bundle_id)
+			if jito_bundle_id is not None:
+				bundle_data = get_jito_bundle_data(jito_bundle_id)
+				if bundle_data is not None:
+					market_trades_df.loc[market_trades_df['txSig'] == tx_sig, 'jitoLandedTipLamports'] = bundle_data['landedTipLamports']
+					market_trades_df.loc[market_trades_df['txSig'] == tx_sig, 'jitoLandedCu'] = bundle_data['landedCu']
+					market_trades_df.loc[market_trades_df['txSig'] == tx_sig, 'jitoblockIndex'] = bundle_data['blockIndex']
+					market_trades_df.loc[market_trades_df['txSig'] == tx_sig, 'jitoTippers'] = json.dumps(bundle_data['tippers'])
+					market_trades_df.loc[market_trades_df['txSig'] == tx_sig, 'jitoValidator'] = bundle_data['validator']
+					# st.json(bundle_data, expanded=False)
 
-			with action_col:
-				# Show the data in a table below the pie chart
-				st.dataframe(action_quotes)
+			iter_time = timeit.default_timer() - start_iter_time
+			
+			tx_done += 1
+			progress_bar.progress(tx_done / total_txs_in_batch)
 
-			plot_cumulative_pnl_for_user_account(users_trades, filtered_ua)
+			elapsed_total_time = timeit.default_timer() - start_total_time
+			avg_time_per_tx = elapsed_total_time / tx_done
+			remaining_txs_in_batch = total_txs_in_batch - tx_done
+			estimated_remaining_time_seconds = avg_time_per_tx * remaining_txs_in_batch
+			
+			status_text.caption(f"Processed {tx_done}/{total_txs_in_batch} transactions in this batch. " 
+								 f"Avg time/tx: {avg_time_per_tx:.2f}s. "
+								 f"Est. time remaining for batch: {timedelta(seconds=int(estimated_remaining_time_seconds))}")
+			
+			# time.sleep(1) # Maintained original sleep, consider if this is for rate limiting or can be removed/adjusted
+			# if tx_done > 10: # Maintained original break condition for testing
+			# 	break
+		
+		
+		
+		progress_bar.empty()
+		status_text.empty()
 
-			with st.expander("Show user raw data"):
-				if filtered_uas:
-					st.write(f"# users_trades")
-					st.write(users_trades)
-					
-					# Add download button for users_trades
-					csv_users = users_trades.to_csv(index=False)
-					st.download_button(
-						label="Download users_trades as CSV",
-						data=csv_users,
-						file_name=f'users_trades_{filtered_ua}.csv',
-						mime='text/csv',
-					)
+		# --- NEW SECTION FOR BATCH STATISTICS ---
+		# Filter the main dataframe for the transactions that were just processed
+		processed_mask = market_trades_df['txSig'].isin(tx_sigs_to_process)
+		# Contains all trades for the processed tx_sigs
+		processed_trades_in_batch_df = market_trades_df[processed_mask].copy() 
 
-					st.write(f"# users_trades minified")
+		st.subheader(f"Statistics for Processed Batch (Offset: {offset}, Size: {len(tx_sigs_to_process)})")
 
-					columns = [
-						'ts', 'user_direction', 'user_base', 'user_cum_base',
-						'realized_pnl', 'user_cum_pnl', 'user', 'counterparty',
-						'fillPrice', 'oraclePrice'
-					]
-					[columns.append(f'oraclePrice_{period}') for period in markout_periods]
-					columns.extend([
-						'userPremium', 'userPremiumDollar',
+		if processed_trades_in_batch_df.empty:
+			st.write("No transaction data processed in this batch to display statistics.")
+		else:
+			# Get unique transaction data from the processed batch
+			# These columns are per-transaction, so drop_duplicates on txSig is appropriate
+			unique_tx_in_batch_df = processed_trades_in_batch_df.drop_duplicates(subset=['txSig']).copy()
 
-					])
-					[columns.append(f'userPremium{period}Dollar') for period in markout_periods]
+			num_tx_processed_in_batch = len(unique_tx_in_batch_df)
+			
+			# Jito transactions count
+			num_jito_tx = unique_tx_in_batch_df['jitoBundleId'].notna().sum()
 
-					users_trades_minified = users_trades[columns]
-					st.write(users_trades_minified)
+			st.write(f"- Unique transactions processed in this batch: {num_tx_processed_in_batch}")
+			st.write(f"- Jito transactions in this batch: {num_jito_tx} ({num_jito_tx*100.0/num_tx_processed_in_batch if num_tx_processed_in_batch > 0 else 0:.2f}%)")
 
-					# Add download button for users_trades_minified
-					csv_minified = users_trades_minified.to_csv(index=False)
-					st.download_button(
-						label="Download users_trades_minified as CSV",
-						data=csv_minified,
-						file_name=f'users_trades_minified_{filtered_ua}.csv',
-						mime='text/csv',
-					)
+			# Prepare data for histograms using unique_tx_in_batch_df
+			compute_units = pd.to_numeric(unique_tx_in_batch_df['txComputeUnitsConsumed'], errors='coerce').dropna()
+			fee_paid = pd.to_numeric(unique_tx_in_batch_df['txFeePaid'], errors='coerce').dropna()
+			
+			# For Jito tips, filter for Jito transactions first
+			jito_tx_data = unique_tx_in_batch_df[unique_tx_in_batch_df['jitoBundleId'].notna()]
+			jito_tips = pd.to_numeric(jito_tx_data['jitoLandedTipLamports'], errors='coerce').dropna()
+			
+			# Combined fee (txFeePaid + jitoLandedTipLamports or 0)
+			unique_tx_in_batch_df['txFeePaidNumeric'] = pd.to_numeric(unique_tx_in_batch_df['txFeePaid'], errors='coerce').fillna(0)
+			unique_tx_in_batch_df['jitoLandedTipLamportsNumeric'] = pd.to_numeric(unique_tx_in_batch_df['jitoLandedTipLamports'], errors='coerce').fillna(0)
+			
+			unique_tx_in_batch_df['totalEffectiveFee'] = unique_tx_in_batch_df['txFeePaidNumeric'] + unique_tx_in_batch_df['jitoLandedTipLamportsNumeric']
+			total_effective_fee = unique_tx_in_batch_df['totalEffectiveFee'].dropna()
 
-		with st.expander("Show raw data"):
-			st.write(f"# market_trades_df")
-			st.write(market_trades_df)
-			st.write(f"# processed_trades_df")
-			st.write(processed_trades_df)
+			# Plotting using subplots
+			fig_hist = make_subplots(
+				rows=1, cols=4, 
+				subplot_titles=(
+					"txComputeUnitsConsumed", 
+					"txFeePaid (lamports)", 
+					"jitoLandedTipLamports (Jito Txs)", 
+					"Total Effective Fee (lamports)"
+				),
+				horizontal_spacing=0.05 # Adjusted for 1x4 layout
+			)
+
+			# Histogram 1: txComputeUnitsConsumed
+			if not compute_units.empty:
+				fig_hist.add_trace(go.Histogram(x=compute_units, name="Compute Units"), row=1, col=1)
+			else:
+				fig_hist.add_annotation(text="No data", xref="x domain", yref="y domain", x=0.5, y=0.5, showarrow=False, row=1, col=1)
+			fig_hist.update_xaxes(title_text="Compute Units", row=1, col=1)
+			fig_hist.update_yaxes(title_text="Frequency", row=1, col=1)
+
+			# Histogram 2: txFeePaid
+			if not fee_paid.empty:
+				fig_hist.add_trace(go.Histogram(x=fee_paid, name="Fee Paid"), row=1, col=2)
+			else:
+				fig_hist.add_annotation(text="No data", xref="x domain", yref="y domain", x=0.5, y=0.5, showarrow=False, row=1, col=2)
+			fig_hist.update_xaxes(title_text="Fee Paid (lamports)", row=1, col=2)
+			fig_hist.update_yaxes(title_text="Frequency", row=1, col=2)
+
+			# Histogram 3: jitoLandedTipLamports
+			if not jito_tips.empty:
+				fig_hist.add_trace(go.Histogram(x=jito_tips, name="Jito Tip"), row=1, col=3)
+			else:
+				fig_hist.add_annotation(text="No Jito tips data", xref="x domain", yref="y domain", x=0.5, y=0.5, showarrow=False, row=1, col=3)
+			fig_hist.update_xaxes(title_text="Jito Tip (lamports)", row=1, col=3)
+			fig_hist.update_yaxes(title_text="Frequency", row=1, col=3)
+
+			# Histogram 4: totalEffectiveFee
+			if not total_effective_fee.empty:
+				fig_hist.add_trace(go.Histogram(x=total_effective_fee, name="Total Effective Fee"), row=1, col=4)
+			else:
+				fig_hist.add_annotation(text="No data", xref="x domain", yref="y domain", x=0.5, y=0.5, showarrow=False, row=1, col=4)
+			fig_hist.update_xaxes(title_text="Total Effective Fee (lamports)", row=1, col=4)
+			fig_hist.update_yaxes(title_text="Frequency", row=1, col=4)
+
+			fig_hist.update_layout(
+				height=400, # Adjusted height for 1x4 layout
+				showlegend=False,
+				title_text="Batch Transaction Metrics Overview",
+				plot_bgcolor='white',
+				paper_bgcolor='white'
+			)
+			fig_hist.update_xaxes(showgrid=True, gridwidth=1, gridcolor='LightGrey')
+			fig_hist.update_yaxes(showgrid=True, gridwidth=1, gridcolor='LightGrey')
+
+			st.plotly_chart(fig_hist, use_container_width=True)
+
+		# --- END OF NEW SECTION ---
+
+		st.write(f"# market_trades_df")
+		st.write(market_trades_df.sort_values(by='ts', ascending=False))
