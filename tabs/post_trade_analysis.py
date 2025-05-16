@@ -677,27 +677,48 @@ async def post_trade_analysis(clearinghouse: DriftClient):
 
 			plot_cumulative_pnl_for_user_account(users_trades, filtered_ua)
 
+			with st.expander("Show raw data"):
+				if filtered_uas:
+					st.write(f"# users_trades")
+					st.write(users_trades)
+					
+					# Add download button for users_trades
+					csv_users = users_trades.to_csv(index=False)
+					st.download_button(
+						label="Download users_trades as CSV",
+						data=csv_users,
+						file_name=f'users_trades_{filtered_ua}.csv',
+						mime='text/csv',
+					)
+
+					st.write(f"# users_trades minified")
+
+					columns = [
+						'ts', 'user_direction', 'user_base', 'user_cum_base',
+						'realized_pnl', 'user_cum_pnl', 'user', 'counterparty',
+						'fillPrice', 'oraclePrice'
+					]
+					[columns.append(f'oraclePrice_{period}') for period in markout_periods]
+					columns.extend([
+						'userPremium', 'userPremiumDollar',
+
+					])
+					[columns.append(f'userPremium{period}Dollar') for period in markout_periods]
+
+					users_trades_minified = users_trades[columns]
+					st.write(users_trades_minified)
+
+					# Add download button for users_trades_minified
+					csv_minified = users_trades_minified.to_csv(index=False)
+					st.download_button(
+						label="Download users_trades_minified as CSV",
+						data=csv_minified,
+						file_name=f'users_trades_minified_{filtered_ua}.csv',
+						mime='text/csv',
+					)
+
 		with st.expander("Show raw data"):
 			st.write(f"# market_trades_df")
 			st.write(market_trades_df)
 			st.write(f"# processed_trades_df")
 			st.write(processed_trades_df)
-			if filtered_uas:
-				st.write(f"# users_trades")
-				st.write(users_trades)
-				st.write(f"# users_trades minified")
-
-				columns = [
-					'ts', 'user_direction', 'user_base', 'user_cum_base',
-					'realized_pnl', 'user_cum_pnl', 'user', 'counterparty',
-					'fillPrice', 'oraclePrice'
-				]
-				[columns.append(f'oraclePrice_{period}') for period in markout_periods]
-				columns.extend([
-					'userPremium', 'userPremiumDollar',
-
-				])
-				[columns.append(f'userPremium{period}Dollar') for period in markout_periods]
-
-				users_trades_minified = users_trades[columns]
-				st.write(users_trades_minified)
