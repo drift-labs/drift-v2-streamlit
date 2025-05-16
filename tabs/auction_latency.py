@@ -36,22 +36,38 @@ st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 async def auction_latency(clearinghouse: DriftClient):
 	# Read local CSV file for auction latency data
 	try:
-		auction_latency_df = pd.read_csv('may_15_auction_latency.csv')
+		auction_latency_df_original = pd.read_csv('may_15_auction_latency.csv')
+
+		st.write("### Percentage of Trades Filled Within Auction")
+		filter_non_auction_fills = st.checkbox("Filter out fills outside of auction (auction_progress > 1)", value=True)
+		if filter_non_auction_fills:
+			auction_latency_df = auction_latency_df_original[auction_latency_df_original['auction_progress'] <= 1].copy()
+		else:
+			auction_latency_df = auction_latency_df_original.copy()
 
 		# Calculate summary statistics
-		st.write("### Auction Progress Summary Statistics")
 		summary_stats = auction_latency_df.groupby(['marketindex', 'markettype'])['auction_progress'].describe().reset_index()
 		
 		# Sort by count in descending order
 		summary_stats = summary_stats.sort_values(by='count', ascending=False).reset_index(drop=True)
+
+		# Calculate percentage of trades filled within auction
+		within_auction_df = auction_latency_df.copy()
+		within_auction_df['filled_within_auction'] = within_auction_df['auction_progress'] <= 1
+		
+		filled_within_auction_summary = within_auction_df.groupby(['marketindex', 'markettype'])['filled_within_auction'].agg(['sum', 'count']).reset_index()
+		filled_within_auction_summary['percentage_filled_within_auction'] = (filled_within_auction_summary['sum'] / filled_within_auction_summary['count']) * 100
+		filled_within_auction_summary = filled_within_auction_summary.rename(columns={'sum': 'trades_within_auction', 'count': 'total_trades'})
+		filled_within_auction_summary = filled_within_auction_summary.sort_values(by='total_trades', ascending=False).reset_index(drop=True)
+		st.dataframe(filled_within_auction_summary[['marketindex', 'markettype', 'trades_within_auction', 'total_trades', 'percentage_filled_within_auction']])
 
 		# Add a selection column and select top 10 by default
 		summary_stats['Select to Plot'] = False
 		top_n = min(10, len(summary_stats))
 		summary_stats.loc[:top_n-1, 'Select to Plot'] = True
 		
-		st.write("Distribution of auction progress for each market `(fill_slot - order_slot)/auction_duration`. Based on fills on May 15, 2025")
-		st.write("Select markets from the table below to plot the distributions:")
+		st.write(f"Distribution of auction progress for each market `(fill_slot - order_slot)/auction_duration`. Based on fills on May 15, 2025")
+		st.write(f"Summary statistics (filtering out auction only: {filter_non_auction_fills}):")
 		
 		col = st.columns(2)
 		with col[0]: 
@@ -71,11 +87,11 @@ async def auction_latency(clearinghouse: DriftClient):
 		with col[1]:
 			# Add a selector for x-axis scale
 			x_axis_scale_options = ['linear', 'log']
-			selected_x_axis_scale = st.selectbox("Select X-axis scale for histograms:", x_axis_scale_options, index=0) # Default to linear
+			selected_x_axis_scale = st.selectbox("Select X-axis scale for histograms:", x_axis_scale_options, index=0)
 
 			# Add a selector for y-axis scale
 			y_axis_scale_options = ['linear', 'log']
-			selected_y_axis_scale = st.selectbox("Select Y-axis scale for histograms:", y_axis_scale_options, index=1) # Default to log
+			selected_y_axis_scale = st.selectbox("Select Y-axis scale for histograms:", y_axis_scale_options, index=0)
 
 
 		# Plot histograms of auction_progress for selected markets
