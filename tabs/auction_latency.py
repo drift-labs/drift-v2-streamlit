@@ -37,22 +37,69 @@ async def auction_latency(clearinghouse: DriftClient):
 	# Read local CSV file for auction latency data
 	try:
 		auction_latency_df_original = pd.read_csv('may_15_auction_latency.csv')
+		st.write(f"Columns in loaded CSV: {auction_latency_df_original.columns.tolist()}") # Diagnostic print
 
 		st.write("### Percentage of Trades Filled Within Auction")
+
+		default_excluded_users = [
+			"GGbgZLcBWDKP1Trhh5vzs9hX3TxDFZPt3oaJRnKwVeB6", "45LQKTnrEcKWMCz2ECbT9RczNuDvb5Gr2JjZj1e3uJBF",
+			"6YhekEW8rLpnCWty86hHck54yE5UJbpAWQqot1d8uYMG", "BEaUJkvtRDjcwb5nYeqT6WXX1uUMfDZu4y73zjKPu6nV",
+			"Er1RDT6hK3ELGrw3e2sdWEpL3fGpiqbDUmrktULcfoHT", "37fQT3ycEU4HeCVe7h3pYAPZJXdCXC9gNFsfjGx4Ryxq",
+			"5DxkTJDA1fx7zLyerYYFsyQnYEdgp8AdHuS8St8FfPW1", "BQ4Cvv34cTGGDGsnUzhFGkx5jFykBBYuDynCZ6e8agWG",
+			"5ADqAWZ6q6i49GiR5CGc5Qg2ZWH5Es4MrLgNsWyeFUj8"
+		]
+
+		# Ensure all default users are present in the options
+		# Combine unique takers and makers for options, handling potential NAs
+		available_takers_makers = list(pd.concat([
+		    auction_latency_df_original['taker'].dropna(),
+		    auction_latency_df_original['maker'].dropna()
+		]).unique())
+		valid_default_excluded_users = [user for user in default_excluded_users if user in available_takers_makers]
+
+		excluded_users = st.multiselect(
+			"Exclude users (taker or maker):", # Reverted label
+			options=available_takers_makers, 
+			default=valid_default_excluded_users
+		)
+
 		filter_non_auction_fills = st.checkbox("Filter out fills outside of auction (auction_progress > 1)", value=True)
 		if filter_non_auction_fills:
 			auction_latency_df = auction_latency_df_original[auction_latency_df_original['auction_progress'] <= 1].copy()
 		else:
 			auction_latency_df = auction_latency_df_original.copy()
 
-		# Calculate summary statistics
+		# Apply user exclusion filter to auction_latency_df
+		if excluded_users:
+			auction_latency_df = auction_latency_df[
+			    (~auction_latency_df['taker'].astype(str).isin(excluded_users)) &
+			    (~auction_latency_df['maker'].astype(str).isin(excluded_users))
+			].copy() # Use .copy() to ensure it's a new DataFrame
+
+		# Add a selection box to filter for a specific maker
+		unique_makers = ["All"] + sorted(list(auction_latency_df['maker'].dropna().unique()))
+		selected_maker = st.selectbox(
+			"Filter for maker:",
+			options=unique_makers,
+			index=0  # Default to "All"
+		)
+
+		# Apply maker filter if a specific maker is selected
+		if selected_maker != "All":
+			auction_latency_df = auction_latency_df[auction_latency_df['maker'] == selected_maker].copy()
+
+		# Calculate summary statistics (now based on filtered auction_latency_df)
 		summary_stats = auction_latency_df.groupby(['marketindex', 'markettype'])['auction_progress'].describe().reset_index()
 		
 		# Sort by count in descending order
 		summary_stats = summary_stats.sort_values(by='count', ascending=False).reset_index(drop=True)
 
 		# Calculate percentage of trades filled within auction
-		within_auction_df = auction_latency_df.copy()
+		within_auction_df = auction_latency_df.copy() # auction_latency_df is already filtered by users
+
+		# The user exclusion filter previously here on within_auction_df is now redundant
+		# as auction_latency_df (from which within_auction_df is copied) is already filtered.
+		
 		within_auction_df['filled_within_auction'] = within_auction_df['auction_progress'] <= 1
 		
 		filled_within_auction_summary = within_auction_df.groupby(['marketindex', 'markettype'])['filled_within_auction'].agg(['sum', 'count']).reset_index()
