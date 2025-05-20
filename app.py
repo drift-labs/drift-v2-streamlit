@@ -12,6 +12,7 @@ from solana.rpc.async_api import AsyncClient
 from solders.keypair import Keypair
 
 from tabs.amplify_stats import show_amplify_stats
+from tabs.acred_stats import show_acred_stats
 from tabs.api import show_api
 from tabs.competition import competitions
 from tabs.counterparty_analysis import counterparty_analysis_page
@@ -127,6 +128,7 @@ def main():
         "Liquidation Calculator",
         "Amplify Stats",
         "Auction Latency",
+        "ACRED Stats",
     )
 
     to_remove = [
@@ -375,6 +377,9 @@ def main():
     elif tab.lower() == "amplify stats":
         loop = asyncio.new_event_loop()
         loop.run_until_complete(show_amplify_stats(clearing_house))
+    elif tab.lower() == "acred stats":
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(show_acred_stats(clearing_house))
     hide_streamlit_style = """
             <style>
             #MainMenu {visibility: hidden;}
