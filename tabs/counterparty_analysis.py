@@ -630,12 +630,6 @@ async def counterparty_analysis_page(drift_client: DriftClient):
             ),
         },
         hide_index=True,
-        # use_container_width=True # Optional: make table fill width
-        # For links to work, rendering HTML might be needed, but st.dataframe doesn't directly support clickable links within cells from text easily.
-        # A common workaround involves markdown rendering if st.dataframe evolves or using AgGrid component.
-        # For now, the HTML link will be displayed as text.
-        # To render HTML properly, we'd have to stick with st.markdown or use a custom component.
-        # Let's revert to markdown with clickable links as st.dataframe won't render the <a> tag.
     )
 
     with st.expander("Show Processed User Trade Data (with Markouts)"):
