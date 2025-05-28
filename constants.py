@@ -1,3 +1,25 @@
+from driftpy.constants.perp_markets import mainnet_perp_market_configs
+from driftpy.constants.spot_markets import mainnet_spot_market_configs
+
+
+def get_all_markets():
+    perp_markets = [m.symbol for m in mainnet_perp_market_configs]
+    spot_markets = [m.symbol for m in mainnet_spot_market_configs]
+
+    markets = []
+    for perp in perp_markets:
+        markets.append(perp)
+        base_asset = perp.replace("-PERP", "")
+        if base_asset in spot_markets:
+            markets.append(base_asset)
+
+    for spot in spot_markets:
+        if spot not in markets:
+            markets.append(spot)
+
+    return markets
+
+
 ALL_MARKET_NAMES = [
     "1KWEN-PERP",
     "1MBONK-PERP",

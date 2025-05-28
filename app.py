@@ -11,14 +11,16 @@ from driftpy.drift_client import AccountSubscriptionConfig, DriftClient
 from solana.rpc.async_api import AsyncClient
 from solders.keypair import Keypair
 
-from tabs.amplify_stats import show_amplify_stats
 from tabs.acred_stats import show_acred_stats
+from tabs.amplify_stats import show_amplify_stats
 from tabs.api import show_api
+from tabs.auction_latency import auction_latency
 from tabs.competition import competitions
 from tabs.counterparty_analysis import counterparty_analysis_page
 from tabs.dlp import dlp
 from tabs.fee_income import fee_income_page
 from tabs.fees import fee_page
+from tabs.fill_speed import fill_speed_analysis
 from tabs.funding_history import funding_history
 from tabs.gpt import gpt_page
 from tabs.if_stakers import insurance_fund_page
@@ -26,6 +28,7 @@ from tabs.imf import imf_page
 from tabs.liqcalc import liqcalc
 from tabs.liquidity import mm_page
 from tabs.logs import log_page
+from tabs.maker_tx_landing_analysis import maker_tx_landing_analysis
 from tabs.mm_program import mm_program_page
 from tabs.openbookv2 import tab_openbookv2
 from tabs.orders import orders_page
@@ -33,8 +36,6 @@ from tabs.overview_markets import show_overview_markets
 from tabs.perpLP import perp_lp_page
 from tabs.pid import show_pid_positions
 from tabs.post_trade_analysis import post_trade_analysis
-from tabs.auction_latency import auction_latency
-from tabs.maker_tx_landing_analysis import maker_tx_landing_analysis
 from tabs.refs import ref_page
 from tabs.simulations import sim_page
 from tabs.superstake import super_stake
@@ -129,6 +130,7 @@ def main():
         "Amplify Stats",
         "Auction Latency",
         "ACRED Stats",
+        "Fill Speed Analysis",
     )
 
     to_remove = [
@@ -380,6 +382,9 @@ def main():
     elif tab.lower() == "acred stats":
         loop = asyncio.new_event_loop()
         loop.run_until_complete(show_acred_stats(clearing_house))
+    elif tab.lower() == "fill speed analysis":
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(fill_speed_analysis(clearing_house))
     hide_streamlit_style = """
             <style>
             #MainMenu {visibility: hidden;}
