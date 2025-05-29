@@ -75,7 +75,6 @@ async def fill_speed_analysis(clearinghouse: DriftClient):
 
     st.write("## Overall Fill Speed Metrics (All Selected Data)")
 
-    num_days_with_data = 0
     if not filtered_data.empty:
         num_days_with_data = filtered_data["datetime"].dt.normalize().nunique()
 
@@ -205,6 +204,29 @@ async def fill_speed_analysis(clearinghouse: DriftClient):
             use_container_width=True,
             key="individual_cohort_heatmaps",
         )
+
+    # --- Individual Cohort Box Plot Subplots ---
+    st.write("#### Fill Speed Distribution by Individual Cohort (Box Plots)")
+    if "share_y_axes_individual_cohort_boxes" not in st.session_state:
+        st.session_state.share_y_axes_individual_cohort_boxes = False
+
+    st.session_state.share_y_axes_individual_cohort_boxes = st.toggle(
+        "🔗 Share Y-Axis Across Cohort Box Plots",
+        value=st.session_state.share_y_axes_individual_cohort_boxes,
+        key="toggle_share_y_cohort_boxes",
+    )
+    if not filtered_data.empty:
+        fig_individual_cohort_boxes = create_individual_cohort_box_subplots(
+            filtered_data,
+            share_y_axes=st.session_state.share_y_axes_individual_cohort_boxes,
+        )
+        st.plotly_chart(
+            fig_individual_cohort_boxes,
+            use_container_width=True,
+            key="individual_cohort_box_subplots",
+        )
+    else:
+        st.info("No data available to display individual cohort box plots.")
 
     st.write("#### Key Metrics by Cohort")
     cohort_order = ["0-1k", "1k-10k", "10k-100k", "100k+"]
@@ -337,10 +359,25 @@ async def fill_speed_analysis(clearinghouse: DriftClient):
             on_select="rerun",
         )
         if heatmap_selection and heatmap_selection.selection:
-            if heatmap_selection.selection.points:
-                handle_heatmap_selection(
-                    heatmap_selection.selection.points, heatmap_display_data
-                )
+            handle_heatmap_selection(
+                heatmap_selection.selection.points, heatmap_display_data
+            )
+
+    # --- Box Plot for Overall Daily Averaged Percentiles ---
+    st.write("## Overall Percentile Distribution (Box Plot)")
+    if not daily_avg_data.empty:
+        overall_box_col1, _ = st.columns([5, 1])
+        with overall_box_col1:
+            fig_overall_box = create_box_plot(daily_avg_data)
+            st.plotly_chart(
+                fig_overall_box,
+                use_container_width=True,
+                key="overall_box_plot_chart",
+            )
+    else:
+        st.info(
+            "Not enough daily average data to display the overall percentile distribution box plot."
+        )
 
 
 def apply_filters(data):
@@ -389,7 +426,6 @@ def create_interactive_heatmap(data, metric, color_scale):
     """Create interactive heatmap with percentiles on Y-axis and time on X-axis
     Assumes input `data` is already aggregated daily with necessary percentile columns.
     """
-    # `data` is now heatmap_df, which is pre-aggregated daily
     percentile_cols = [
         "p10",
         "p20",
@@ -403,19 +439,13 @@ def create_interactive_heatmap(data, metric, color_scale):
         "p99",
     ]
 
-    # Create matrix for heatmap
-    # Dates are already unique in heatmap_df from groupby('date')
     dates = sorted(data["date"].unique())
 
-    # Build the Z matrix (percentiles x dates)
     z_matrix = []
     for percentile in percentile_cols:
-        # For each percentile, get the row from heatmap_df that corresponds to it
-        # Since heatmap_df is date-indexed, and columns are p10,p20..p99, we can directly use them
         row_values = data.set_index("date")[percentile].reindex(dates).values
         z_matrix.append(row_values)
 
-    # Create custom hover text
     hover_text = []
     for i, percentile_label in enumerate(percentile_cols):
         hover_row = []
@@ -491,21 +521,27 @@ def create_timeseries_chart(data):
 
 
 def create_box_plot(data):
-    """Create interactive box plot"""
     fig = go.Figure()
 
-    percentiles = ["p10", "p50", "p90", "p99"]
+    percentile_cols = sorted(
+        [col for col in data.columns if col.startswith("p") and col[1:].isdigit()]
+    )
 
-    for p in percentiles:
-        fig.add_trace(
-            go.Box(
-                y=data[p],
-                name=p.upper(),
-                boxpoints="outliers",
-                marker=dict(size=4),
-                line=dict(width=2),
+    if not percentile_cols:
+        st.warning("No percentile columns (p10-p99) found in data for the box plot.")
+        return fig
+
+    for p in percentile_cols:
+        if not data[p].dropna().empty:
+            fig.add_trace(
+                go.Box(
+                    y=data[p].dropna(),
+                    name=p.upper(),
+                    boxpoints="outliers",
+                    legendgroup=p.upper(),
+                    showlegend=(p == percentile_cols[0]),
+                ),
             )
-        )
 
     fig.update_layout(
         title="Fill Time Distribution by Percentile (Click outliers to filter)",
@@ -519,7 +555,7 @@ def create_box_plot(data):
 
 def create_trends_chart(data):
     """Create performance trends chart"""
-    window = min(7, len(data) // 4)  # 7 day window or 1/4 of data
+    window = min(7, len(data) // 4)
 
     if window > 1:
         data = data.copy()
@@ -592,7 +628,6 @@ def create_trends_chart(data):
 
         return fig
     else:
-        # Fallback for small datasets
         fig = go.Figure()
         fig.add_trace(
             go.Scatter(
@@ -609,7 +644,6 @@ def handle_heatmap_selection(points, data):
         return
 
     try:
-        # Extract selected dates from heatmap
         selected_dates = []
         for point in points:
             if isinstance(point, dict) and "x" in point:
@@ -635,7 +669,6 @@ def handle_timeseries_selection(points, data):
         return
 
     try:
-        # Extract selected date range
         selected_dates = []
         for point in points:
             if isinstance(point, dict) and "x" in point:
@@ -658,7 +691,6 @@ def handle_box_selection(points, data):
         return
 
     try:
-        # Extract selected performance range
         selected_values = []
         for point in points:
             if isinstance(point, dict) and "y" in point:
@@ -703,7 +735,6 @@ def handle_timeseries_range_selection(range_data, data):
         return
 
     try:
-        # Range selection provides x0, x1 coordinates
         if hasattr(range_data, "x") and len(range_data.x) >= 2:
             x_range = range_data.x
             min_date = pd.to_datetime(min(x_range))
@@ -818,9 +849,7 @@ async def fetch_fill_speed_data(start_date, end_date, selected_market):
                 for p_col in percentile_cols:
                     raw_val = record.get(p_col)
                     if raw_val is not None and raw_val != "NaN":
-                        transformed_record[p_col] = (
-                            float(raw_val) * 100
-                        )  # Multiply by 100 here
+                        transformed_record[p_col] = float(raw_val) * 100
                     else:
                         transformed_record[p_col] = np.nan
                 all_processed_data.append(transformed_record)
@@ -1093,4 +1122,83 @@ def create_individual_cohort_heatmap_subplots(data, common_color_scale):
     )
     fig.update_traces(showscale=True)
 
+    return fig
+
+
+def create_individual_cohort_box_subplots(data, share_y_axes=False):
+    """Create a 2x2 grid of box plots, one for each cohort, showing distributions of key percentiles."""
+    cohort_order = ["0-1k", "1k-10k", "10k-100k", "100k+"]
+    percentiles_to_plot = sorted(
+        [col for col in data.columns if col.startswith("p") and col[1:].isdigit()]
+    )
+
+    if not percentiles_to_plot:
+        fig = go.Figure()
+        fig.update_layout(
+            title_text="No percentile data available for cohort box plots"
+        )
+        return fig
+
+    fig = make_subplots(
+        rows=2,
+        cols=2,
+        subplot_titles=[f"Box Plot - Cohort: {c}" for c in cohort_order],
+        shared_xaxes=True,
+        shared_yaxes=share_y_axes,
+        vertical_spacing=0.15,
+        horizontal_spacing=0.05,
+    )
+
+    all_y_values_for_shared_axis = []
+
+    for i, cohort in enumerate(cohort_order):
+        cohort_data = data[data["cohort"] == cohort]
+        row_idx = (i // 2) + 1
+        col_idx = (i % 2) + 1
+
+        if not cohort_data.empty:
+            for p_col in percentiles_to_plot:
+                if (
+                    p_col in cohort_data.columns
+                    and not cohort_data[p_col].dropna().empty
+                ):
+                    valid_y_data = cohort_data[p_col].dropna()
+                    fig.add_trace(
+                        go.Box(
+                            y=valid_y_data,
+                            name=p_col.upper(),
+                            boxpoints="outliers",
+                            legendgroup=p_col.upper(),
+                            showlegend=(i == 0),
+                        ),
+                        row=row_idx,
+                        col=col_idx,
+                    )
+                    if share_y_axes:
+                        all_y_values_for_shared_axis.extend(valid_y_data.tolist())
+
+        fig.update_yaxes(
+            title_text="Fill Time (% auction duration)", row=row_idx, col=col_idx
+        )
+
+    if share_y_axes and all_y_values_for_shared_axis:
+        global_y_min = min(all_y_values_for_shared_axis)
+        global_y_max = max(all_y_values_for_shared_axis)
+        padded_min = global_y_min * 0.95 if global_y_min > 0 else global_y_min * 1.05
+        padded_max = global_y_max * 1.05
+        if padded_min == padded_max:
+            padded_min -= 1
+            padded_max += 1
+        if padded_min > padded_max:
+            padded_min, padded_max = padded_max, padded_min
+
+        fig.update_yaxes(range=[padded_min, padded_max])
+    else:
+        fig.update_yaxes(autorange=True)
+
+    fig.update_layout(
+        title_text="Fill Speed Distribution by Order Size Cohort (Box Plots)",
+        height=800,
+        legend_title_text="Percentile",
+    )
     return fig
