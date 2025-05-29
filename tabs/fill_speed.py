@@ -66,7 +66,7 @@ async def fill_speed_analysis(clearinghouse: DriftClient):
                 filter_info.append("Date filter active")
         if st.session_state.performance_filter:
             filter_info.append(
-                f"P90: {st.session_state.performance_filter[0]:.2f}slots to {st.session_state.performance_filter[1]:.2f}slots"
+                f"P90: {st.session_state.performance_filter[0]:.2f}% auction duration to {st.session_state.performance_filter[1]:.2f}% auction duration"
             )
 
         st.info(
@@ -85,7 +85,7 @@ async def fill_speed_analysis(clearinghouse: DriftClient):
     with overall_metrics_row1_col2:
         if not filtered_data.empty:
             avg_median = filtered_data["p50"].mean()
-            st.metric("Avg Median Fill Time", f"{avg_median:.2f} slots")
+            st.metric("Avg Median Fill Time", f"{avg_median:.2f}% auction duration")
         else:
             st.metric("Avg Median Fill Time", "N/A")
 
@@ -95,21 +95,23 @@ async def fill_speed_analysis(clearinghouse: DriftClient):
     with overall_metrics_row2_col1:
         if not filtered_data.empty:
             avg_p90 = filtered_data["p90"].mean()
-            st.metric("Avg P90 Fill Time", f"{avg_p90:.2f} slots")
+            st.metric("Avg P90 Fill Time", f"{avg_p90:.2f}% auction duration")
         else:
             st.metric("Avg P90 Fill Time", "N/A")
     with overall_metrics_row2_col2:
         if not filtered_data.empty:
             avg_p99 = filtered_data["p99"].mean()
-            st.metric("Avg P99 Fill Time", f"{avg_p99:.2f} slots")
+            st.metric("Avg P99 Fill Time", f"{avg_p99:.2f}% auction duration")
         else:
             st.metric("Avg P99 Fill Time", "N/A")
     with overall_metrics_row2_col3:
         if not filtered_data.empty:
             fast_fills_pct = (filtered_data["p80"] < 1.0).mean() * 100
-            st.metric("Fast Periods (P80<1 slot)", f"{fast_fills_pct:.1f}%")
+            st.metric(
+                "Fast Periods (P80<1% auction duration)", f"{fast_fills_pct:.1f}%"
+            )
         else:
-            st.metric("Fast Periods (P80<1 slot)", "N/A")
+            st.metric("Fast Periods (P80<1% auction duration)", "N/A")
 
     cohort_pxx_col1, cohort_pxx_col2 = st.columns([4, 2])
     with cohort_pxx_col1:
@@ -231,16 +233,18 @@ async def fill_speed_analysis(clearinghouse: DriftClient):
                 fast_fills_pct_cohort = (cohort_specific_data["p80"] < 1.0).mean() * 100
 
                 st.metric("Number of Days", f"{num_days_cohort}")
-                st.metric("Avg Median", f"{avg_median_cohort:.2f} slots")
-                st.metric("Avg P90", f"{avg_p90_cohort:.2f} slots")
-                st.metric("Avg P99", f"{avg_p99_cohort:.2f} slots")
-                st.metric("Fast P80<1 slot", f"{fast_fills_pct_cohort:.1f}%")
+                st.metric("Avg Median", f"{avg_median_cohort:.2f}% auction duration")
+                st.metric("Avg P90", f"{avg_p90_cohort:.2f}% auction duration")
+                st.metric("Avg P99", f"{avg_p99_cohort:.2f}% auction duration")
+                st.metric(
+                    "Fast P80<1% auction duration", f"{fast_fills_pct_cohort:.1f}%"
+                )
             else:
                 st.metric("Number of Days", "N/A")
                 st.metric("Avg Median", "N/A")
                 st.metric("Avg P90", "N/A")
                 st.metric("Avg P99", "N/A")
-                st.metric("Fast P80<1 slot", "N/A")
+                st.metric("Fast P80<1% auction duration", "N/A")
     st.markdown("<br>", unsafe_allow_html=True)  # Add some space
 
     st.write("## Fill Speed Percentiles Over Time (Combined Average)")
@@ -311,7 +315,7 @@ async def fill_speed_analysis(clearinghouse: DriftClient):
         st.write("**Heatmap shows (daily avg across cohorts):**")
         st.write("• Y-axis: Avg Percentiles")
         st.write("• X-axis: Time (dates)")
-        st.write("• Color: Fill time values (slots)")
+        st.write("• Color: Fill time values (% auction duration)")
     with heatmap_col3:
         if st.button(
             "🔄 Reset Heatmap Filter",
@@ -419,7 +423,7 @@ def create_interactive_heatmap(data, metric, color_scale):
             value = z_matrix[i][j]
             if not np.isnan(value):
                 hover_row.append(
-                    f"Date: {date_val}<br>Avg Percentile: {percentile_label.upper()}<br>Fill Time: {value:.3f} slots"
+                    f"Date: {date_val}<br>Avg Percentile: {percentile_label.upper()}<br>Fill Time: {value:.3f}% auction duration"
                 )
             else:
                 hover_row.append(
@@ -436,7 +440,7 @@ def create_interactive_heatmap(data, metric, color_scale):
             hoverongaps=False,
             hovertemplate="%{text}<extra></extra>",
             text=hover_text,
-            colorbar=dict(title="Avg Fill Time (slots)"),
+            colorbar=dict(title="Avg Fill Time (% auction duration)"),
         )
     )
 
@@ -476,7 +480,7 @@ def create_timeseries_chart(data):
     fig.update_layout(
         title="Fill Speed Percentiles Over Time (Drag to select date range)",
         xaxis_title="Time",
-        yaxis_title="Fill Time (slots)",
+        yaxis_title="Fill Time (% auction duration)",
         height=500,
         hovermode="x unified",
         dragmode="select",
@@ -505,7 +509,7 @@ def create_box_plot(data):
 
     fig.update_layout(
         title="Fill Time Distribution by Percentile (Click outliers to filter)",
-        yaxis_title="Fill Time (slots)",
+        yaxis_title="Fill Time (% auction duration)",
         height=400,
         dragmode="select",
     )
@@ -582,8 +586,8 @@ def create_trends_chart(data):
         )
 
         fig.update_layout(height=600, showlegend=True)
-        fig.update_yaxes(title_text="Fill Time (slots)", row=1, col=1)
-        fig.update_yaxes(title_text="Fill Time (slots)", row=2, col=1)
+        fig.update_yaxes(title_text="Fill Time (% auction duration)", row=1, col=1)
+        fig.update_yaxes(title_text="Fill Time (% auction duration)", row=2, col=1)
         fig.update_xaxes(title_text="Time", row=2, col=1)
 
         return fig
@@ -812,11 +816,13 @@ async def fetch_fill_speed_data(start_date, end_date, selected_market):
                 )
 
                 for p_col in percentile_cols:
-                    transformed_record[p_col] = (
-                        float(record[p_col])
-                        if record.get(p_col) is not None and record[p_col] != "NaN"
-                        else np.nan
-                    )
+                    raw_val = record.get(p_col)
+                    if raw_val is not None and raw_val != "NaN":
+                        transformed_record[p_col] = (
+                            float(raw_val) * 100
+                        )  # Multiply by 100 here
+                    else:
+                        transformed_record[p_col] = np.nan
                 all_processed_data.append(transformed_record)
 
         if not all_processed_data:
@@ -853,7 +859,7 @@ def create_all_cohorts_comparison_chart(data, selection_mode):
     if selection_mode == "Distribution Ribbon (P10-P90)":
         required_cols = ["p10", "p50", "p90"]
         title_text = "P10-P90 Fill Time Distribution with P50 Median Across Cohorts"
-        yaxis_title_text = "Fill Time (slots)"
+        yaxis_title_text = "Fill Time (% auction duration)"
         for col in required_cols:
             if col not in data.columns:
                 st.error(f"Required percentile '{col}' for ribbon not found in data.")
@@ -905,7 +911,9 @@ def create_all_cohorts_comparison_chart(data, selection_mode):
             return fig
 
         title_text = f"{percentile_to_plot.upper()} Fill Time Across Order Size Cohorts"
-        yaxis_title_text = f"{percentile_to_plot.upper()} Fill Time (slots)"
+        yaxis_title_text = (
+            f"{percentile_to_plot.upper()} Fill Time (% auction duration)"
+        )
 
         for idx, cohort in enumerate(cohort_order):
             cohort_data = data[data["cohort"] == cohort].sort_values(by="datetime")
@@ -970,7 +978,9 @@ def create_individual_cohort_subplots(data, share_y_axes=False):
                     row=row_idx,
                     col=col_idx,
                 )
-        fig.update_yaxes(title_text="Fill Time (slots)", row=row_idx, col=col_idx)
+        fig.update_yaxes(
+            title_text="Fill Time (% auction duration)", row=row_idx, col=col_idx
+        )
 
     if share_y_axes:
         global_max_val = 0
@@ -1049,7 +1059,7 @@ def create_individual_cohort_heatmap_subplots(data, common_color_scale):
                     value = z_matrix[r_idx][c_idx]
                     text = f"Date: {date_val}<br>Cohort: {cohort}<br>Percentile: {percentile_label.upper()}<br>"
                     text += (
-                        f"Fill Time: {value:.3f} slots"
+                        f"Fill Time: {value:.3f}% auction duration"
                         if not np.isnan(value)
                         else "No data"
                     )
