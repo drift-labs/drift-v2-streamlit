@@ -26,6 +26,8 @@ async def fill_speed_analysis(clearinghouse: DriftClient):
         st.session_state.performance_filter = None
     if "share_y_axes_individual_cohorts" not in st.session_state:
         st.session_state.share_y_axes_individual_cohorts = False
+    if "order_type_filter" not in st.session_state:
+        st.session_state.order_type_filter = "normal"
 
     top_col1, top_col2, top_col3 = st.columns([2, 2, 1])
     with top_col1:
@@ -42,6 +44,15 @@ async def fill_speed_analysis(clearinghouse: DriftClient):
         index=0,
     )
 
+    order_type_options = ["normal", "swift"]
+    selected_order_type = st.selectbox(
+        "Select Order Type:",
+        options=order_type_options,
+        index=order_type_options.index(st.session_state.order_type_filter),
+        key="order_type_selector",
+    )
+    st.session_state.order_type_filter = selected_order_type
+
     fill_data = await fetch_fill_speed_data(start_date, end_date, selected_market)
 
     if fill_data is None or fill_data.empty:
@@ -51,7 +62,11 @@ async def fill_speed_analysis(clearinghouse: DriftClient):
     fill_data["datetime"] = pd.to_datetime(fill_data["ts"], unit="s")
     filtered_data = apply_filters(fill_data)
 
-    if st.session_state.date_filter or st.session_state.performance_filter:
+    if (
+        st.session_state.date_filter
+        or st.session_state.performance_filter
+        or st.session_state.order_type_filter
+    ):
         filter_info = []
         if st.session_state.date_filter:
             try:
@@ -68,6 +83,8 @@ async def fill_speed_analysis(clearinghouse: DriftClient):
             filter_info.append(
                 f"P90: {st.session_state.performance_filter[0]:.2f}% auction duration to {st.session_state.performance_filter[1]:.2f}% auction duration"
             )
+        if st.session_state.order_type_filter:
+            filter_info.append(f"Order Type: {st.session_state.order_type_filter}")
 
         st.info(
             f"🔍 Active filters: {' | '.join(filter_info)} ({len(filtered_data)}/{len(fill_data)} data points)"
@@ -80,7 +97,7 @@ async def fill_speed_analysis(clearinghouse: DriftClient):
 
     overall_metrics_row1_col1, overall_metrics_row1_col2 = st.columns(2)
     with overall_metrics_row1_col1:
-        st.metric("Number of Days with Data", f"{num_days_with_data}")
+        st.metric("Number of Days", f"{num_days_with_data}")
     with overall_metrics_row1_col2:
         if not filtered_data.empty:
             avg_median = filtered_data["p50"].mean()
@@ -88,9 +105,7 @@ async def fill_speed_analysis(clearinghouse: DriftClient):
         else:
             st.metric("Avg Median Fill Time", "N/A")
 
-    overall_metrics_row2_col1, overall_metrics_row2_col2, overall_metrics_row2_col3 = (
-        st.columns(3)
-    )
+    overall_metrics_row2_col1, overall_metrics_row2_col2 = st.columns(2)
     with overall_metrics_row2_col1:
         if not filtered_data.empty:
             avg_p90 = filtered_data["p90"].mean()
@@ -103,14 +118,6 @@ async def fill_speed_analysis(clearinghouse: DriftClient):
             st.metric("Avg P99 Fill Time", f"{avg_p99:.2f}% auction duration")
         else:
             st.metric("Avg P99 Fill Time", "N/A")
-    with overall_metrics_row2_col3:
-        if not filtered_data.empty:
-            fast_fills_pct = (filtered_data["p80"] < 1.0).mean() * 100
-            st.metric(
-                "Fast Periods (P80<1% auction duration)", f"{fast_fills_pct:.1f}%"
-            )
-        else:
-            st.metric("Fast Periods (P80<1% auction duration)", "N/A")
 
     cohort_pxx_col1, cohort_pxx_col2 = st.columns([4, 2])
     with cohort_pxx_col1:
@@ -393,6 +400,11 @@ def apply_filters(data):
     if st.session_state.performance_filter:
         min_p90, max_p90 = st.session_state.performance_filter
         filtered = filtered[(filtered["p90"] >= min_p90) & (filtered["p90"] <= max_p90)]
+
+    if st.session_state.order_type_filter:
+        filtered = filtered[
+            filtered["order_type"] == st.session_state.order_type_filter
+        ]
 
     return filtered
 
@@ -787,6 +799,9 @@ async def fetch_fill_speed_data(start_date, end_date, selected_market):
         "100000": "100k+",
     }
     api_cohort_values_to_query = ["0", "1000", "10000", "100000"]
+    bit_flag_api_values = [0, 1]  # API expects 0 for normal, 1 for swift
+    bit_flag_display_map = {0: "normal", 1: "swift"}
+
     percentile_cols = [f"p{p}" for p in [10, 20, 30, 40, 50, 60, 70, 80, 90, 99]]
     all_processed_data = []
 
@@ -794,65 +809,72 @@ async def fetch_fill_speed_data(start_date, end_date, selected_market):
 
     try:
         for cohort_value in api_cohort_values_to_query:
-            all_records_for_this_cohort = []
-            current_chunk_start_date = start_date
+            for bit_flag_api_val in bit_flag_api_values:  # Loop through 0 and 1
+                all_records_for_this_cohort_and_type = []
+                current_chunk_start_date = start_date
 
-            api_url_base = f"https://data-staging.api.drift.trade/stats/{market_to_query}/analytics/auctionLatency/D/{cohort_value}"
-            cohort_display_name = api_cohort_to_display_cohort.get(
-                cohort_value, cohort_value
-            )
-
-            while current_chunk_start_date <= end_date:
-                chunk_end_date = current_chunk_start_date + timedelta(
-                    days=99
-                )  # Max 100 days per chunk
-                if chunk_end_date > end_date:
-                    chunk_end_date = end_date
-
-                chunk_start_ts = int(
-                    dt.combine(current_chunk_start_date, dt.min.time()).timestamp()
+                api_url_base = f"https://data-staging.api.drift.trade/stats/{market_to_query}/analytics/auctionLatency/D/{cohort_value}/{bit_flag_api_val}"
+                cohort_display_name = api_cohort_to_display_cohort.get(
+                    cohort_value, cohort_value
                 )
-                chunk_end_ts = int(
-                    dt.combine(chunk_end_date, dt.max.time()).timestamp()
-                )
+                order_type_display_name = bit_flag_display_map[bit_flag_api_val]
 
-                params = {
-                    "startTs": chunk_start_ts,
-                    "endTs": chunk_end_ts,
-                    "limit": 100,  # API limit
-                }
+                while current_chunk_start_date <= end_date:
+                    chunk_end_date = current_chunk_start_date + timedelta(
+                        days=99
+                    )  # Max 100 days per chunk
+                    if chunk_end_date > end_date:
+                        chunk_end_date = end_date
 
-                chunk_raw_records = _fetch_single_cohort_data(
-                    api_url_base, params, cohort_display_name
-                )
+                    chunk_start_ts = int(
+                        dt.combine(current_chunk_start_date, dt.min.time()).timestamp()
+                    )
+                    chunk_end_ts = int(
+                        dt.combine(chunk_end_date, dt.max.time()).timestamp()
+                    )
 
-                if chunk_raw_records:
-                    all_records_for_this_cohort.extend(chunk_raw_records)
+                    params = {
+                        "startTs": chunk_start_ts,
+                        "endTs": chunk_end_ts,
+                        "limit": 100,  # API limit
+                    }
 
-                current_chunk_start_date = chunk_end_date + timedelta(days=1)
+                    chunk_raw_records = _fetch_single_cohort_data(
+                        api_url_base,
+                        params,
+                        f"{cohort_display_name} ({order_type_display_name})",
+                    )
 
-            raw_records = all_records_for_this_cohort
+                    if chunk_raw_records:
+                        all_records_for_this_cohort_and_type.extend(chunk_raw_records)
 
-            if not raw_records:
-                continue
+                    current_chunk_start_date = chunk_end_date + timedelta(days=1)
 
-            for record in raw_records:
-                transformed_record = {}
-                transformed_record["ts"] = record["ts"]
-                transformed_record["datetime"] = pd.to_datetime(
-                    record["ts"], unit="s"
-                ).replace(hour=12, minute=0, second=0, microsecond=0)
-                transformed_record["cohort"] = api_cohort_to_display_cohort.get(
-                    str(record["cohort"]), "Unknown"
-                )
+                raw_records = all_records_for_this_cohort_and_type
 
-                for p_col in percentile_cols:
-                    raw_val = record.get(p_col)
-                    if raw_val is not None and raw_val != "NaN":
-                        transformed_record[p_col] = float(raw_val) * 100
-                    else:
-                        transformed_record[p_col] = np.nan
-                all_processed_data.append(transformed_record)
+                if not raw_records:
+                    continue
+
+                for record in raw_records:
+                    transformed_record = {}
+                    transformed_record["ts"] = record["ts"]
+                    transformed_record["datetime"] = pd.to_datetime(
+                        record["ts"], unit="s"
+                    ).replace(hour=12, minute=0, second=0, microsecond=0)
+                    transformed_record["cohort"] = api_cohort_to_display_cohort.get(
+                        str(record["cohort"]), "Unknown"
+                    )
+                    transformed_record["order_type"] = bit_flag_display_map[
+                        bit_flag_api_val
+                    ]  # Store as 'normal' or 'swift'
+
+                    for p_col in percentile_cols:
+                        raw_val = record.get(p_col)
+                        if raw_val is not None and raw_val != "NaN":
+                            transformed_record[p_col] = float(raw_val) * 100
+                        else:
+                            transformed_record[p_col] = np.nan
+                    all_processed_data.append(transformed_record)
 
         if not all_processed_data:
             st.info(
