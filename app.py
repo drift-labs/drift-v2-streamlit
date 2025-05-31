@@ -396,7 +396,13 @@ def main():
 
 if __name__ == "__main__":
     try:
-        st.set_page_config("Drift v2", layout="wide", page_icon="👾")
+        image_path = os.path.join(os.path.dirname(__file__), "images/drift-light.png")
+        st.logo(image=image_path)
+        st.set_page_config(
+            page_title="Drift Analytics",
+            layout="wide",
+            page_icon="📈",
+        )
     except Exception as e:
         print(e)
         pass
