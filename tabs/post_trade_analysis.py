@@ -125,16 +125,15 @@ def render_trades_stats_for_user_account(processed_trades_df, filter_ua):
 	'''
 	Plots and prints some stats for the user_account
 	'''
-	if filter_ua == 'vAMM':
+	if filter_ua == 'vAMM' or filter_ua == '':
 		user_trades_df = processed_trades_df.loc[
-			(processed_trades_df['maker'].isna()) | (processed_trades_df['taker'].isna())
+			(processed_trades_df['maker'] == '') | (processed_trades_df['taker'] == '')
 		].copy()
 		filter_ua = None
 	else:
 		user_trades_df = processed_trades_df.loc[
 			(processed_trades_df['maker'] == filter_ua) | (processed_trades_df['taker'] == filter_ua)
 		].copy()
-
 
 	user_trades_df['isMaker'] = user_trades_df['maker'] == filter_ua
 	user_trades_df['counterparty'] = np.where(
@@ -632,13 +631,15 @@ async def post_trade_analysis(clearinghouse: DriftClient):
 		# Extract unique user accounts from the data
 		unique_makers = set(market_trades_df['maker'].dropna().unique())
 		unique_takers = set(market_trades_df['taker'].dropna().unique())
-		unique_accounts = list(unique_makers.union(unique_takers)) + ['vAMM']
+		unique_accounts = list(unique_makers.union(unique_takers))
+		unique_accounts.remove('')
+		unique_accounts = ['vAMM'] + unique_accounts
 
 		# Let user select from the accounts found in the data
 		filtered_uas = st.multiselect("Select user accounts", unique_accounts)
 
 		for filtered_ua in filtered_uas:
-			st.write(f"# User Account: {filtered_ua}")
+			st.write(f"# User Account: {'vAMM' if filtered_ua == '' else filtered_ua }")
 			users_trades = render_trades_stats_for_user_account(processed_trades_df, filtered_ua)
 
 			# Create columns for filter and distribution
