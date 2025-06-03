@@ -3,13 +3,19 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 
 import pandas as pd
+import plotly.express as px
 import pytz
 import streamlit as st
 from driftpy.constants.perp_markets import mainnet_perp_market_configs
-from driftpy.constants.spot_markets import mainnet_spot_market_configs
 from streamlit.runtime.scriptrunner import add_script_run_ctx
 
 from datafetch.api_fetch import get_trades_for_range_pandas
+
+
+def get_trades_for_range_pandas_with_toast(market_symbol, start_date, end_date):
+    df = get_trades_for_range_pandas(market_symbol, start_date, end_date)
+    st.toast(f"Fetched {len(df)} trades for {market_symbol}")
+    return df
 
 
 def get_trades_for_range_multiple_markets(
@@ -33,7 +39,7 @@ def get_trades_for_range_multiple_markets(
             futures = []
             for task in api_tasks:
                 future = executor.submit(
-                    get_trades_for_range_pandas,
+                    get_trades_for_range_pandas_with_toast,
                     task["market"],
                     task["start_date"],
                     task["end_date"],
@@ -45,7 +51,7 @@ def get_trades_for_range_multiple_markets(
         for future, task in futures:
             try:
                 raw_records = future.result()
-                st.toast(f"Fetched {market} data ✅")
+                st.toast(f"Fetched {task['market']} data ✅")
                 market = task["market"]
                 markets_data[market] = raw_records
             except Exception as e:
@@ -80,39 +86,30 @@ def vamm_stats_page():
     if date_mode == "Single Date":
         date = col2.date_input(
             "Select date:",
-            min_value=datetime.datetime(2022, 11, 4),
+            min_value=datetime.datetime(2023, 11, 4),
             max_value=datetime.datetime.now(tzInfo),
+            value=datetime.datetime.now(tzInfo) - datetime.timedelta(days=1),
             help="UTC timezone",
         )
         start_date = end_date = date
     else:
         start_date = col2.date_input(
             "Start date:",
-            min_value=datetime.datetime(2022, 11, 4),
-            max_value=datetime.datetime.now(tzInfo),
+            value=datetime.datetime.now(tzInfo) - datetime.timedelta(days=7),
+            min_value=datetime.datetime(2023, 11, 4),
+            max_value=datetime.datetime.now(tzInfo) - datetime.timedelta(days=1),
             help="UTC timezone",
         )
         end_date = col3.date_input(
             "End date:",
             min_value=start_date,
             max_value=datetime.datetime.now(tzInfo),
-            value=start_date,
+            value=datetime.datetime.now(tzInfo),
             help="UTC timezone",
         )
 
     perp_markets = [m.symbol for m in mainnet_perp_market_configs]
-    spot_markets = [m.symbol for m in mainnet_spot_market_configs]
-
-    markets = []
-    for perp in perp_markets:
-        markets.append(perp)
-        base_asset = perp.replace("-PERP", "")
-        if base_asset in spot_markets:
-            markets.append(base_asset)
-
-    for spot in spot_markets:
-        if spot not in markets:
-            markets.append(spot)
+    markets = perp_markets
 
     if date_mode == "Single Date":
         selected_markets = col3.multiselect(
@@ -141,10 +138,9 @@ def vamm_stats_page():
         else:
             st.info(f"Fetching data for {start_date}")
 
-        with st.spinner("Fetching trade data..."):
-            markets_data = get_trades_for_range_multiple_markets(
-                selected_markets, start_date, end_date
-            )
+        markets_data = get_trades_for_range_multiple_markets(
+            selected_markets, start_date, end_date
+        )
 
         if markets_data:
             if date_mode == "Date Range":
@@ -305,6 +301,177 @@ def vamm_stats_page():
                 viz_df = pd.DataFrame(viz_data).set_index("Market")
 
                 st.bar_chart(viz_df)
+
+            st.subheader("Daily vAMM Percentage Trend (combined maker and taker)")
+
+            daily_vamm_records_list = []
+            all_market_dfs_for_aggregate = []
+            blocktime_column_found_overall = True
+
+            for market_name, original_df in markets_data.items():
+                if original_df.empty:
+                    if market_name in selected_markets:
+                        pass
+                    continue
+
+                df = original_df.copy()
+
+                df["quoteAssetAmountFilled"] = pd.to_numeric(
+                    df["quoteAssetAmountFilled"], errors="coerce"
+                ).fillna(0)
+
+                if "ts" not in df.columns:
+                    if blocktime_column_found_overall:
+                        st.error(
+                            "Timestamp column 'ts' not found in some market data. Daily time series may be incomplete or missing for those markets."
+                        )
+                    blocktime_column_found_overall = False
+                    if market_name in selected_markets:
+                        chart_s_date = pd.to_datetime(start_date)
+                        chart_e_date = pd.to_datetime(end_date)
+                        for date_obj in pd.date_range(
+                            start=chart_s_date, end=chart_e_date, freq="D"
+                        ):
+                            daily_vamm_records_list.append(
+                                {
+                                    "Date": date_obj,
+                                    "Market": market_name,
+                                    "VammPercentage": 0.0,
+                                }
+                            )
+                    continue
+
+                df["timestamp"] = pd.to_datetime(df["ts"], unit="s")
+                all_market_dfs_for_aggregate.append(df.copy())
+                if not df.empty:
+                    daily_groups = df.groupby(df["timestamp"].dt.date)
+
+                    for date_obj, group in daily_groups:
+                        market_volume_day = group["quoteAssetAmountFilled"].sum()
+                        vamm_trades_day = group[
+                            ((group["maker"].isnull()) | (group["maker"] == ""))
+                            | ((group["taker"].isnull()) | (group["taker"] == ""))
+                        ]
+                        vamm_volume_day = vamm_trades_day[
+                            "quoteAssetAmountFilled"
+                        ].sum()
+
+                        vamm_percentage_day = (
+                            (vamm_volume_day / market_volume_day * 100)
+                            if market_volume_day > 0
+                            else 0.0
+                        )
+
+                        daily_vamm_records_list.append(
+                            {
+                                "Date": pd.to_datetime(date_obj),
+                                "Market": market_name,
+                                "VammPercentage": vamm_percentage_day,
+                            }
+                        )
+
+            if all_market_dfs_for_aggregate:
+                combined_df = pd.concat(all_market_dfs_for_aggregate)
+                if not combined_df.empty and "timestamp" in combined_df.columns:
+                    daily_groups_combined = combined_df.groupby(
+                        combined_df["timestamp"].dt.date
+                    )
+
+                    for date_obj, group in daily_groups_combined:
+                        total_volume_day = group["quoteAssetAmountFilled"].sum()
+
+                        vamm_trades_day_combined = group[
+                            ((group["maker"].isnull()) | (group["maker"] == ""))
+                            | ((group["taker"].isnull()) | (group["taker"] == ""))
+                        ]
+                        total_vamm_volume_day = vamm_trades_day_combined[
+                            "quoteAssetAmountFilled"
+                        ].sum()
+
+                        aggregate_vamm_percentage_day = (
+                            (total_vamm_volume_day / total_volume_day * 100)
+                            if total_volume_day > 0
+                            else 0.0
+                        )
+
+                        daily_vamm_records_list.append(
+                            {
+                                "Date": pd.to_datetime(date_obj),
+                                "Market": "Aggregate",
+                                "VammPercentage": aggregate_vamm_percentage_day,
+                            }
+                        )
+                elif not blocktime_column_found_overall:
+                    chart_s_date = pd.to_datetime(start_date)
+                    chart_e_date = pd.to_datetime(end_date)
+                    for date_obj in pd.date_range(
+                        start=chart_s_date, end=chart_e_date, freq="D"
+                    ):
+                        daily_vamm_records_list.append(
+                            {
+                                "Date": date_obj,
+                                "Market": "Aggregate",
+                                "VammPercentage": 0.0,
+                            }
+                        )
+
+            if daily_vamm_records_list:
+                time_series_plot_df = pd.DataFrame(daily_vamm_records_list)
+
+                chart_start_date = pd.to_datetime(start_date)
+                chart_end_date = pd.to_datetime(end_date)
+                all_chart_dates = pd.date_range(
+                    start=chart_start_date, end=chart_end_date, freq="D"
+                )
+
+                pivot_df = time_series_plot_df.pivot_table(
+                    index="Date", columns="Market", values="VammPercentage"
+                )
+
+                pivot_df = pivot_df.reindex(all_chart_dates, fill_value=0.0)
+
+                final_columns_for_chart = []
+                for market_name in selected_markets:
+                    if market_name not in pivot_df.columns:
+                        pivot_df[market_name] = 0.0
+                    final_columns_for_chart.append(market_name)
+
+                if "Aggregate" not in pivot_df.columns:
+                    pivot_df["Aggregate"] = 0.0
+                if "Aggregate" not in final_columns_for_chart:
+                    final_columns_for_chart.append("Aggregate")
+
+                cols_to_plot = [
+                    col for col in final_columns_for_chart if col in pivot_df.columns
+                ]
+                other_existing_cols = [
+                    col for col in pivot_df.columns if col not in cols_to_plot
+                ]
+                pivot_df = pivot_df[cols_to_plot + other_existing_cols]
+                pivot_df = pivot_df.sort_index()
+
+                if not pivot_df.empty:
+                    fig = px.line(pivot_df, title="Daily vAMM Percentage (%)")
+                    fig.update_layout(
+                        xaxis_title="Date", yaxis_title="vAMM Percentage (%)"
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info(
+                        "No data to display for the daily vAMM percentage trend after processing."
+                    )
+            elif not markets_data:  # No initial data at all
+                st.info("No market data loaded, skipping daily trend chart.")
+            elif (
+                not blocktime_column_found_overall and not all_market_dfs_for_aggregate
+            ):
+                st.warning(
+                    "No time series data generated as 'ts' column was missing in all relevant market data."
+                )
+            else:  # Some other case, e.g. all data filtered out by date, or no trades
+                st.info(
+                    "No trade data found for the selected markets/date range to generate a daily trend chart."
+                )
 
                 st.subheader("Export Data")
                 csv = stats_df.to_csv(index=False)
