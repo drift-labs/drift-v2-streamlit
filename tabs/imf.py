@@ -62,9 +62,15 @@ async def imf_page(clearing_house: DriftClient):
                 ["Liability (Borrow)", "Asset (Collateral)"],
                 help="Calculate IMF effect on borrowing vs collateral capacity",
             )
+            hlm_toggle_overview = st.toggle(
+                "High Leverage Mode",
+                key="overview_hlm_toggle",
+                value=False,
+                help="Enable High Leverage Mode (HLM) for Perpetual markets. Uses the market's specific High Leverage Initial/Maintenance margin ratios if available. Does not affect Spot markets.",
+            )
 
-        # Prepare data for both perp and spot markets
         overview = {}
+
         for i in range(state.number_of_markets):
             market = ch.get_perp_market_account(i)
             nom = bytes(market.name).decode("utf-8").strip("\x00")
@@ -77,12 +83,32 @@ async def imf_page(clearing_house: DriftClient):
                 )
             )
             res = [
-                calculate_market_margin_ratio(market, 0, MarginCategory.INITIAL),
-                calculate_market_margin_ratio(market, size, MarginCategory.INITIAL),
-                calculate_market_margin_ratio(market, 0, MarginCategory.MAINTENANCE),
-                calculate_market_margin_ratio(market, size, MarginCategory.MAINTENANCE),
+                calculate_market_margin_ratio(
+                    market,
+                    0,
+                    MarginCategory.INITIAL,
+                    user_high_leverage_mode=hlm_toggle_overview,
+                ),
+                calculate_market_margin_ratio(
+                    market,
+                    size,
+                    MarginCategory.INITIAL,
+                    user_high_leverage_mode=hlm_toggle_overview,
+                ),
+                calculate_market_margin_ratio(
+                    market,
+                    0,
+                    MarginCategory.MAINTENANCE,
+                    user_high_leverage_mode=hlm_toggle_overview,
+                ),
+                calculate_market_margin_ratio(
+                    market,
+                    size,
+                    MarginCategory.MAINTENANCE,
+                    user_high_leverage_mode=hlm_toggle_overview,
+                ),
             ]
-            res = [1 / (x / MARGIN_PRECISION) for x in res]
+            res = [1 / (x / MARGIN_PRECISION) if x > 0 else float("inf") for x in res]
             res = [market.imf_factor / 1e6] + res
             overview[nom] = res
 
@@ -165,6 +191,12 @@ async def imf_page(clearing_house: DriftClient):
                 ["Liability (Borrow)", "Asset (Collateral)"],
                 help="Calculate IMF effect on borrowing vs collateral",
             )
+            hlm_toggle_calculator = st.toggle(
+                "High Leverage Mode",
+                key="calculator_hlm_toggle",
+                value=False,
+                help="Enable High Leverage Mode (HLM) for Perpetual markets. Uses the market's specific High Leverage Initial/Maintenance margin ratios if available. Does not affect Spot markets.",
+            )
 
         market_idx = 0
         oracle_px = 1.0
@@ -176,41 +208,172 @@ async def imf_page(clearing_house: DriftClient):
                 if mode == "Spot":
                     start_idx = 1
                     n = state.number_of_spot_markets
-                market_idx = st.selectbox("Market:", range(start_idx, n), 0)
+
+                market_options = range(start_idx, n)
+                if not market_options and n > 0:
+                    st.warning(
+                        f"No {mode} markets available with current indexing. Adjust start_idx or check market availability."
+                    )
+                elif n == 0:
+                    st.warning(f"No {mode} markets available at all.")
+                    st.stop()
+
+                market_idx_display_name_map = {}
+                actual_market_indices = []
 
                 if mode == "Perpetual":
-                    market = ch.get_perp_market_account(market_idx)
+                    for i in range(state.number_of_markets):
+                        m = ch.get_perp_market_account(i)
+                        market_idx_display_name_map[i] = f"{i}: {decode_name(m.name)}"
+                        actual_market_indices.append(i)
+                    market_options = actual_market_indices
+
+                elif mode == "Spot":
+                    for i in range(state.number_of_spot_markets):
+                        m = ch.get_spot_market_account(i)
+                        market_idx_display_name_map[i] = f"{i}: {decode_name(m.name)}"
+                        actual_market_indices.append(i)
+                    market_options = actual_market_indices
+
+                if not market_options:
+                    st.warning(f"No {mode} markets could be listed.")
+                    st.stop()
+
+                selected_market_idx = st.selectbox(
+                    "Market:",
+                    options=list(market_options),
+                    format_func=lambda x: market_idx_display_name_map.get(x, str(x)),
+                    index=0,
+                )
+
+                standard_init_weight = 0.0
+                standard_maint_weight = 0.0
+                market_name_decoded = "N/A"
+
+                if mode == "Perpetual":
+                    market = ch.get_perp_market_account(selected_market_idx)
+                    market_name_decoded = decode_name(market.name)
+
+                    base_initial_mr = (
+                        calculate_market_margin_ratio(
+                            market,
+                            0,
+                            MarginCategory.INITIAL,
+                            user_high_leverage_mode=hlm_toggle_calculator,
+                        )
+                        / MARGIN_PRECISION
+                    )
+                    base_maint_mr = (
+                        calculate_market_margin_ratio(
+                            market,
+                            0,
+                            MarginCategory.MAINTENANCE,
+                            user_high_leverage_mode=hlm_toggle_calculator,
+                        )
+                        / MARGIN_PRECISION
+                    )
+
                     if weight_type == "Liability (Borrow)":
-                        init_weight = market.margin_ratio_initial / 1e4
-                        maint_weight = market.margin_ratio_maintenance / 1e4
-                    else:
-                        init_weight = 1 - (market.margin_ratio_initial / 1e4)
-                        maint_weight = 1 - (market.margin_ratio_maintenance / 1e4)
+                        standard_init_weight = base_initial_mr
+                        standard_maint_weight = base_maint_mr
+                    else:  # Asset (representing (1 - margin ratio))
+                        standard_init_weight = 1 - base_initial_mr
+                        standard_maint_weight = 1 - base_maint_mr
+
                     imf = market.imf_factor / 1e6
                     oracle_px = (
-                        market.amm.historical_oracle_data.last_oracle_price / 1e6
+                        market.amm.historical_oracle_data.last_oracle_price
+                        / PRICE_PRECISION
+                    )
+                else:  # Spot
+                    market = ch.get_spot_market_account(selected_market_idx)
+                    market_name_decoded = decode_name(market.name)
+
+                    actual_initial_asset_weight = (
+                        calculate_asset_weight(
+                            0,
+                            market.historical_oracle_data.last_oracle_price,
+                            market,
+                            MarginCategory.INITIAL,
+                        )
+                        / MARGIN_PRECISION
+                    )
+                    actual_maint_asset_weight = (
+                        calculate_asset_weight(
+                            0,
+                            market.historical_oracle_data.last_oracle_price,
+                            market,
+                            MarginCategory.MAINTENANCE,
+                        )
+                        / MARGIN_PRECISION
+                    )
+
+                    actual_initial_liability_weight = (
+                        calculate_liability_weight(0, market, MarginCategory.INITIAL)
+                        / MARGIN_PRECISION
+                    )
+                    actual_maint_liability_weight = (
+                        calculate_liability_weight(
+                            0, market, MarginCategory.MAINTENANCE
+                        )
+                        / MARGIN_PRECISION
+                    )
+
+                    if weight_type == "Liability (Borrow)":
+                        standard_init_weight = actual_initial_liability_weight
+                        standard_maint_weight = actual_maint_liability_weight
+                    else:  # Asset
+                        standard_init_weight = actual_initial_asset_weight
+                        standard_maint_weight = actual_maint_asset_weight
+
+                    imf = market.imf_factor / 1e6
+                    oracle_px = (
+                        market.historical_oracle_data.last_oracle_price
+                        / PRICE_PRECISION
+                    )
+
+                init_weight = standard_init_weight
+                maint_weight = standard_maint_weight
+
+                st.write(f"Selected Market: {market_name_decoded}")
+                disable_imf_slider = mode == "Spot"
+                imf_display_value = imf
+
+                if disable_imf_slider:
+                    st.write(
+                        f"Market IMF Factor: {imf_display_value:.5f} (intrinsic to spot market weights)"
                     )
                 else:
-                    market = ch.get_spot_market_account(market_idx)
-                    if weight_type == "Liability (Borrow)":
-                        init_weight = market.initial_liability_weight / 1e4 - 1
-                        maint_weight = market.maintenance_liability_weight / 1e4 - 1
-                    else:
-                        init_weight = market.initial_asset_weight / 1e4
-                        maint_weight = market.maintenance_asset_weight / 1e4
-                    imf = market.imf_factor / 1e6
-                    oracle_px = market.historical_oracle_data.last_oracle_price / 1e6
+                    max_imf_slider_val = 0.01
+                    imf = st.slider(
+                        "IMF Factor (Perp)",
+                        0.0,
+                        max_imf_slider_val,
+                        imf,
+                        step=0.00005,
+                        format="%.5f",
+                        help="Adjustable for perpetual markets. For spot, IMF is intrinsic.",
+                    )
 
-                st.write(f"Selected Market: {decode_name(market.name)}")
+                if mode == "Perpetual" and hlm_toggle_calculator:
+                    st.info(
+                        "High Leverage Mode (HLM) is ON for Perpetual market calculations."
+                    )
+                elif mode == "Spot" and hlm_toggle_calculator:
+                    st.warning(
+                        "High Leverage Mode (HLM) toggle is ON but does NOT apply to Spot markets."
+                    )
 
-                max_imf = 0.01 if mode == "Perpetual" else 0.5
-                imf = st.slider("IMF Factor", 0.0, max_imf, imf, step=0.00005)
-                st.write(f"Current IMF = {imf:.5f}")
-
-            else:
-                init_weight = st.slider("Initial Weight", 0.0, 1.0, 0.2, step=0.01)
-                maint_weight = st.slider("Maintenance Weight", 0.0, 1.0, 0.1, step=0.01)
-                imf = st.slider("IMF Factor", 0.0, 0.5, 0.001, step=0.0001)
+            else:  # Custom mode
+                init_weight = st.slider(
+                    "Initial Weight/Ratio", 0.0, 2.0, 0.2, step=0.01
+                )
+                maint_weight = st.slider(
+                    "Maintenance Weight/Ratio", 0.0, 2.0, 0.1, step=0.01
+                )
+                imf = st.slider(
+                    "IMF Factor", 0.0, 0.5, 0.001, step=0.0001, format="%.4f"
+                )
                 oracle_px = st.number_input("Oracle Price", value=1.0, min_value=0.0)
 
         with col3:
@@ -228,7 +391,7 @@ async def imf_page(clearing_house: DriftClient):
                 effective_weight = max(init_weight, base_weight + imf * ddsize)
             else:
                 ddsize = np.sqrt(np.abs(base))
-                effective_weight = min(init_weight, (1.1) - imf * ddsize)
+                effective_weight = min(init_weight, (init_weight * 1.05) - imf * ddsize)
 
             if weight_type == "Asset (Collateral)":
                 st.write(f"Base Asset Weight: {init_weight:.3f}")
@@ -273,9 +436,12 @@ async def imf_page(clearing_house: DriftClient):
         )
         df.index = index
 
-        df2 = pd.Series(
-            [calc_effective_weight(maint_weight, imf, x, is_liability) for x in index]
-        )
+        df2_series_data = []
+        for x_val in index:
+            val = calc_effective_weight(maint_weight, imf, x_val, is_liability)
+            df2_series_data.append(val)
+
+        df2 = pd.Series(df2_series_data)
         df2.index = index
 
         imf_df = pd.concat({"Initial": df, "Maintenance": df2}, axis=1)
