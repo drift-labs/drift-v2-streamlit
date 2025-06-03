@@ -19,7 +19,7 @@ def get_trades_for_range_pandas_with_toast(market_symbol, start_date, end_date):
 
 
 def get_trades_for_range_multiple_markets(
-    selected_markets: [str], start_date, end_date
+    selected_markets: list[str], start_date, end_date
 ):
     # this is to disable an annoying warning in the console that streamlit has when calling functions in threadspool
     # read about it: https://discuss.streamlit.io/t/warning-for-missing-scriptruncontext/83893/15
