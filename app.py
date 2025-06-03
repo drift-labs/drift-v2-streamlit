@@ -40,6 +40,7 @@ from tabs.refs import ref_page
 from tabs.simulations import sim_page
 from tabs.superstake import super_stake
 from tabs.tradeflow import trade_flow_analysis
+from tabs.trigger_speed import trigger_speed_analysis
 from tabs.useractivity import show_user_activity
 from tabs.userdataraw import userdataraw
 from tabs.userhealth import show_user_health
@@ -133,6 +134,7 @@ def main():
         "Auction Latency",
         "ACRED Stats",
         "Fill Speed Analysis",
+        "Trigger Speed",
     )
 
     to_remove = [
@@ -389,6 +391,11 @@ def main():
     elif tab.lower() == "fill speed analysis":
         loop = asyncio.new_event_loop()
         loop.run_until_complete(fill_speed_analysis(clearing_house))
+    elif tab.lower() == "trigger speed":
+        trigger_speed_analysis()
+    elif tab.lower() == "user-activity":
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(show_user_activity(clearing_house))
     hide_streamlit_style = """
             <style>
             #MainMenu {visibility: hidden;}
