@@ -62,6 +62,19 @@ def process_trades_df(raw_trades_df: pd.DataFrame) -> pd.DataFrame:
 	for col in numeric_columns:
 		filtered[col] = pd.to_numeric(filtered[col], errors='coerce')
 
+	# Handle cases where maker or taker are empty - set their direction as opposite of counterparty
+	filtered['makerOrderDirection'] = np.where(
+		filtered['maker'] == '',
+		np.where(filtered['takerOrderDirection'] == 'long', 'short', 'long'),
+		filtered['makerOrderDirection']
+	)
+	
+	filtered['takerOrderDirection'] = np.where(
+		filtered['taker'] == '',
+		np.where(filtered['makerOrderDirection'] == 'long', 'short', 'long'),
+		filtered['takerOrderDirection']
+	)
+
 	# Vectorized operations
 	filtered['makerBaseSigned'] = np.where(filtered['makerOrderDirection'] == 'long',
 										   filtered['baseAssetAmountFilled'],
@@ -125,11 +138,12 @@ def render_trades_stats_for_user_account(processed_trades_df, filter_ua):
 	'''
 	Plots and prints some stats for the user_account
 	'''
-	if filter_ua == 'vAMM' or filter_ua == '':
+	is_vamm = filter_ua == 'vAMM' or filter_ua == ''
+	if is_vamm:
 		user_trades_df = processed_trades_df.loc[
 			(processed_trades_df['maker'] == '') | (processed_trades_df['taker'] == '')
 		].copy()
-		filter_ua = None
+		filter_ua = ''
 	else:
 		user_trades_df = processed_trades_df.loc[
 			(processed_trades_df['maker'] == filter_ua) | (processed_trades_df['taker'] == filter_ua)
@@ -146,22 +160,23 @@ def render_trades_stats_for_user_account(processed_trades_df, filter_ua):
 		user_trades_df['maker'],
 		user_trades_df['taker']
 	)
+
 	user_trades_df['user_direction'] = np.where(
 		user_trades_df['maker'] == filter_ua,
 		user_trades_df['makerOrderDirection'],
 		user_trades_df['takerOrderDirection']
 	)
 
-	user_trades_df['user_direction_num'] = np.where(
-		user_trades_df['maker'] == filter_ua,
-		user_trades_df['makerOrderDirectionNum'],
-		user_trades_df['takerOrderDirectionNum']
-	)
-
 	user_trades_df['user_fee_recv'] = np.where(
 		user_trades_df['maker'] == filter_ua,
 		-1 * user_trades_df['makerFee'],
 		-1 * user_trades_df['takerFee'],
+	)
+
+	user_trades_df['user_direction_num'] = np.where(
+		user_trades_df['user_direction'] == 'long',
+		1,
+		-1
 	)
 
 	user_trades_df['user_base'] = np.where(
