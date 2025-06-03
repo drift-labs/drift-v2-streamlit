@@ -50,6 +50,7 @@ from tabs.userstats import show_user_stats
 from tabs.userstatus import userstatus_page
 from tabs.uservolume import show_user_volume
 from tabs.vamm import vamm
+from tabs.vamm_stats import vamm_stats_page
 from tabs.vaults import vaults
 
 # import ssl
@@ -116,6 +117,7 @@ def main():
         "API",
         "SuperStake",
         "vAMM",
+        "vAMM Stats",
         "DLP",
         "FundingHistory",
         "UserDataRaw",
@@ -293,6 +295,8 @@ def main():
     elif tab.lower() == "vamm":
         loop = asyncio.new_event_loop()
         loop.run_until_complete(vamm(clearing_house))
+    elif tab.lower() == "vamm stats":
+        vamm_stats_page()
     elif tab.lower() == "dlp":
         loop = asyncio.new_event_loop()
         loop.run_until_complete(dlp(clearing_house))
