@@ -33,6 +33,12 @@ def trigger_speed_analysis():
         key="trigger_market_select",
     )
 
+    toggle_use_p99 = st.toggle(
+        "Use P99 instead of true maximum for box plots",
+        value=True,
+        key="trigger_use_p99",
+    )
+
     if selected_market and start_date and end_date:
         if start_date > end_date:
             st.error("Start date must be before end date.")
@@ -156,7 +162,11 @@ def trigger_speed_analysis():
                         median=[row["slotsToFillP50"]],
                         q3=[row["slotsToFillP75"]],
                         lowerfence=[row["slotsToFillP10"]],
-                        upperfence=[row["slotsToFillP99"]],
+                        upperfence=[
+                            row["slotsToFillP99"]
+                            if toggle_use_p99
+                            else row["slotsToFillMax"]
+                        ],
                         mean=[row.get("slotsToFillAvg", row["slotsToFillP50"])],
                         name=row["datetime"].strftime("%Y-%m-%d"),
                         showlegend=False,
@@ -186,7 +196,11 @@ def trigger_speed_analysis():
                         median=[row["fillVsTriggerP50"]],
                         q3=[row["fillVsTriggerP75"]],
                         lowerfence=[row["fillVsTriggerP10"]],
-                        upperfence=[row["fillVsTriggerP99"]],
+                        upperfence=[
+                            row["fillVsTriggerP99"]
+                            if toggle_use_p99
+                            else row["fillVsTriggerMax"]
+                        ],
                         mean=[row.get("fillVsTriggerAvg", row["fillVsTriggerP50"])],
                         name=row["datetime"].strftime("%Y-%m-%d"),
                         showlegend=False,
