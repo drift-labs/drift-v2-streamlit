@@ -259,19 +259,23 @@ async def fill_speed_analysis(clearinghouse: DriftClient):
             )
 
     st.write("#### Fill Speed Percentiles by Individual Cohort (Line Charts)")
-    st.session_state.share_y_axes_individual_cohorts = st.toggle(
-        "🔗 Share Y-Axis Across Cohort Line Charts",
-        value=st.session_state.share_y_axes_individual_cohorts,
-        key="toggle_share_y_cohort_lines",
-    )
-    fig_individual_cohorts = create_individual_cohort_subplots(
-        filtered_data, share_y_axes=st.session_state.share_y_axes_individual_cohorts
-    )
-    st.plotly_chart(
-        fig_individual_cohorts,
-        use_container_width=True,
-        key="individual_cohorts_subplots",
-    )
+    with st.expander(
+        "Show/Hide Fill Speed Percentiles by Individual Cohort (Line Charts)",
+        expanded=False,
+    ):
+        st.session_state.share_y_axes_individual_cohorts = st.toggle(
+            "🔗 Share Y-Axis Across Cohort Line Charts",
+            value=st.session_state.share_y_axes_individual_cohorts,
+            key="toggle_share_y_cohort_lines",
+        )
+        fig_individual_cohorts = create_individual_cohort_subplots(
+            filtered_data, share_y_axes=st.session_state.share_y_axes_individual_cohorts
+        )
+        st.plotly_chart(
+            fig_individual_cohorts,
+            use_container_width=True,
+            key="individual_cohorts_subplots",
+        )
 
     st.write("#### Fill Speed Distribution by Individual Cohort (Heatmaps)")
     cohort_heatmap_col1, cohort_heatmap_col2 = st.columns([4, 1])  # For layout control
