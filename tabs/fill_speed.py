@@ -35,7 +35,7 @@ async def fill_speed_analysis(clearinghouse: DriftClient):
     top_col1, top_col2, top_col3 = st.columns([2, 2, 1])
     with top_col1:
         start_date = st.date_input(
-            "Start Date", value=dt.now().date() - timedelta(days=7)
+            "Start Date", value=dt.now().date() - timedelta(days=14)
         )
     with top_col2:
         end_date = st.date_input("End Date", value=dt.now().date() - timedelta(days=1))
@@ -1206,7 +1206,7 @@ async def fetch_fill_speed_data(start_date, end_date, selected_market):
 
         # Show any failures after ThreadPool is done
         if failed_requests:
-            st.warning(f"Some API requests failed:\n" + "\n".join(failed_requests[:5]))
+            st.warning("Some API requests failed:\n" + "\n".join(failed_requests[:5]))
             if len(failed_requests) > 5:
                 st.warning(f"... and {len(failed_requests) - 5} more failures")
 
