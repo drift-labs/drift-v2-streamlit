@@ -8,7 +8,7 @@ import pandas as pd
 import streamlit as st
 
 # Configuration
-DYNAMODB_TABLE_NAME = "staging-analytics"
+DYNAMODB_TABLE_NAME = "mainnet-beta-analytics"
 DYNAMODB_REGION = "eu-west-1"
 AWS_PROFILE = os.getenv("AWS_PROFILE")
 
