@@ -1,42 +1,16 @@
 from datetime import datetime, timedelta
-import timeit
 
-import os
-from typing import Literal
-
-import boto3
-from boto3.dynamodb.conditions import Key
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 from driftpy.constants.perp_markets import mainnet_perp_market_configs
 
-# Remove the BASE_API_URL since we're using DynamoDB now
-# BASE_API_URL = "https://data-staging.api.drift.trade/"
-
-# Configuration
-DYNAMODB_TABLE_NAME = "staging-analytics"
-DYNAMODB_REGION = "eu-west-1"
-AWS_PROFILE = os.getenv("AWS_PROFILE")
-
-# Initialize DynamoDB client
-@st.cache_resource
-def get_dynamodb_client():
-    try:
-        # Use AWS SSO profile
-        session = boto3.Session(region_name=DYNAMODB_REGION, profile_name=AWS_PROFILE)
-        return session.resource('dynamodb', region_name=DYNAMODB_REGION)
-    except Exception as e:
-        st.error(f"Failed to initialize DynamoDB client with profile '{AWS_PROFILE}': {e}")
-        st.error("Make sure you've run: `aws sso login --profile drift-non-prod`")
-        return None
-
-def get_trigger_order_fill_pk(
-        market: str,
-        order_type: Literal['triggerMarket', 'triggerLimit', 'all'],
-        cohort: Literal['0', '1000', '10000', '100000'] = '0') -> str:
-    """Generate the partition key for trigger order fill stats"""
-    return f"ANALYTICS#TRIGGER_ORDER_FILL#{market}#{order_type}#{cohort}"
+# Import DynamoDB utilities
+from utils.dynamodb_client import (
+    get_dynamodb_client,
+    get_trigger_order_fill_pk,
+    fetch_trigger_speed_data_dynamodb
+)
 
 def trigger_speed_analysis():
     st.write("# Trigger Speed Analysis")
@@ -44,7 +18,7 @@ def trigger_speed_analysis():
     with top_col1:
         start_date = st.date_input(
             "Start Date",
-            value=datetime.now().date() - timedelta(days=14),
+            value=datetime.now().date() - timedelta(weeks=15),
             key="trigger_start_date",
         )
     with top_col2:
@@ -401,86 +375,3 @@ def trigger_speed_analysis():
                 for cohort, data_df in processed_cohort_data.items():
                     st.write(f"**Cohort {cohort}**")
                     st.dataframe(data_df)
-
-
-@st.cache_data(ttl=300)
-def fetch_trigger_speed_data_dynamodb(start_ts, end_ts, market_symbol, order_type, cohort='0'):
-    """
-    Fetch trigger speed data from DynamoDB
-    
-    Args:
-        start_ts: Start timestamp (Unix seconds)
-        end_ts: End timestamp (Unix seconds) 
-        market_symbol: Market symbol (e.g., 'SOL-PERP')
-        order_type: 'triggerMarket', 'triggerLimit', or 'all'
-        cohort: Cohort identifier (default '0')
-        limit: Maximum number of records to return
-    """
-    try:
-        dynamodb = get_dynamodb_client()
-        
-        # Check if client initialization failed
-        if dynamodb is None:
-            st.error("Cannot proceed without valid DynamoDB connection.")
-            return pd.DataFrame()
-            
-        table = dynamodb.Table(DYNAMODB_TABLE_NAME)
-        
-        pk = get_trigger_order_fill_pk(market_symbol, order_type, cohort)
-        
-        # Debug information
-        
-        start_time = timeit.default_timer()
-        
-        # Collect all items with pagination
-        all_items = []
-        last_evaluated_key = None
-        page_count = 0
-        
-        while True:
-            page_count += 1
-            query_params = {
-                'KeyConditionExpression': Key('pk').eq(pk) & Key('sk').between(str(start_ts), str(end_ts)),
-                'ScanIndexForward': True
-            }
-            
-            if last_evaluated_key:
-                query_params['ExclusiveStartKey'] = last_evaluated_key
-            
-            response = table.query(**query_params)
-            
-            items = response.get('Items', [])
-            all_items.extend(items)
-            
-            # Check if there are more items to fetch
-            last_evaluated_key = response.get('LastEvaluatedKey')
-            if not last_evaluated_key:
-                break
-        
-        # Debugging metadata
-        # total_time = timeit.default_timer() - start_time
-        # st.write(f"### `{pk}`")
-        # st.write(f"- SK range: `{start_ts}` to `{end_ts}`")
-        # st.write(f"- Total items: {len(all_items)}")
-        # st.write(f"- Pages fetched: {page_count}")
-        # st.write(f"- Query time: {total_time:.2f}s")
-        # st.write(f"- Response size estimate: ~{len(str(all_items)) / 1024:.1f} KB")
-        
-        if not all_items:
-            st.warning(f"No records found in DynamoDB for PK: {pk} in the specified time range.")
-            return pd.DataFrame()
-        
-        # Convert to DataFrame
-        records_df = pd.DataFrame(all_items)
-        
-        # Convert sk back to ts for compatibility with existing code
-        if 'sk' in records_df.columns:
-            records_df['ts'] = pd.to_numeric(records_df['sk'], errors='coerce')
-            records_df.sort_values('ts', inplace=True)
-        
-        return records_df
-        
-    except Exception as e:
-        st.error(f"❌ Error fetching data from DynamoDB: {str(e)}")
-        st.error(f"Table: {DYNAMODB_TABLE_NAME}, Region: {DYNAMODB_REGION}")
-        return pd.DataFrame()

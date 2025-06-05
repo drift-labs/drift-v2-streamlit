@@ -14,7 +14,6 @@ from solders.keypair import Keypair
 from tabs.acred_stats import show_acred_stats
 from tabs.amplify_stats import show_amplify_stats
 from tabs.api import show_api
-from tabs.auction_latency import auction_latency
 from tabs.competition import competitions
 from tabs.counterparty_analysis import counterparty_analysis_page
 from tabs.dlp import dlp
@@ -131,7 +130,6 @@ def main():
         "MM (legacy)",
         "Liquidation Calculator",
         "Amplify Stats",
-        "Auction Latency",
         "ACRED Stats",
         "Fill Speed Analysis",
         "Trigger Speed",
@@ -317,9 +315,6 @@ def main():
     elif tab.lower() == "maker tx landing analysis":
         loop = asyncio.new_event_loop()
         loop.run_until_complete(maker_tx_landing_analysis(clearing_house))
-    elif tab.lower() == "auction latency":
-        loop = asyncio.new_event_loop()
-        loop.run_until_complete(auction_latency(clearing_house))
     elif tab.lower() == "imf":
         loop = asyncio.new_event_loop()
         loop.run_until_complete(imf_page(clearing_house))
