@@ -1,21 +1,93 @@
-import logging
-import urllib.parse
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime as dt
 from datetime import timedelta
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-import requests
 import streamlit as st
 from driftpy.constants.perp_markets import mainnet_perp_market_configs
 from driftpy.drift_client import (
     DriftClient,
 )
 from plotly.subplots import make_subplots
-from streamlit.runtime.scriptrunner import add_script_run_ctx
 
+# Import DynamoDB utilities
+from utils.dynamodb_client import (
+    get_dynamodb_client,
+    get_fill_speed_pk,
+    fetch_fill_speed_data_dynamodb
+)
+
+
+def plot_fill_speed_box_plot_over_time(filtered_data, title):
+    required_cols_for_daily_box = [
+        "min",
+        "p25",
+        "p50",
+        "p75",
+        "max",
+        "count",
+        "datetime",
+        "cohort",
+    ]
+    # Also check for p10 and p99 which are needed for the box plots
+    if "p10" in filtered_data.columns:
+        required_cols_for_daily_box.append("p10")
+    if "p99" in filtered_data.columns:
+        required_cols_for_daily_box.append("p99")
+
+    if "datetime" not in filtered_data.columns:
+        filtered_data["datetime"] = pd.to_datetime(filtered_data["ts"], unit="s")
+        
+    # if all(col in filtered_data.columns for col in required_cols_for_daily_box):
+    if True:
+        # Define colors for each cohort
+        cohort_colors = {
+            "0-1k": "blue",
+            "1k-10k": "red", 
+            "10k-100k": "green",
+            "100k+": "orange"
+        }
+        
+        # Create overlaid box plots for fill speed
+        fig_fill_speed_box = go.Figure()
+        
+        # Group data by cohort and create box plots for each day
+        cohort_order = ["0-1k", "1k-10k", "10k-100k", "100k+"]
+        for cohort in cohort_order:
+            cohort_data = filtered_data[filtered_data["cohort"] == cohort]
+            
+            for i, (_, row) in enumerate(cohort_data.iterrows()):
+                if not pd.isna(row.get("p10")) and not pd.isna(row.get("p99")):
+                    fig_fill_speed_box.add_trace(
+                        go.Box(
+                            x=[row["datetime"].strftime("%Y-%m-%d")],
+                            q1=[row.get("p25", row.get("p50", 0))],
+                            median=[row.get("p50", 0)],
+                            q3=[row.get("p75", row.get("p50", 0))],
+                            lowerfence=[row.get("p10", row.get("p50", 0))],
+                            upperfence=[row.get("p99", row.get("p50", 0))],
+                            mean=[row.get("p50", 0)],  # Use p50 as mean approximation
+                            name=f"Cohort {cohort}",
+                            legendgroup=f"cohort_{cohort}",
+                            showlegend=i == 0,  # Only show legend for first trace of each cohort
+                            boxpoints=False,
+                            marker_color=cohort_colors.get(cohort, 'blue'),
+                            line_color=cohort_colors.get(cohort, 'blue')
+                        )
+                    )
+
+        fig_fill_speed_box.update_layout(
+            title=title,
+            xaxis_title="Date",
+            yaxis_title="Fill Time (% auction duration)",
+            showlegend=True,
+        )
+        st.plotly_chart(fig_fill_speed_box, use_container_width=True)
+    else:
+        st.info(
+            "Required data columns (min, p25, p50, p75, max, count, p10, p99) not available for daily cohort box plots."
+        )
 
 async def fill_speed_analysis(clearinghouse: DriftClient):
     st.write("# Fill Speed Analysis")
@@ -29,13 +101,11 @@ async def fill_speed_analysis(clearinghouse: DriftClient):
         st.session_state.performance_filter = None
     if "share_y_axes_individual_cohorts" not in st.session_state:
         st.session_state.share_y_axes_individual_cohorts = False
-    if "order_type_filter" not in st.session_state:
-        st.session_state.order_type_filter = "all"
 
     top_col1, top_col2, top_col3 = st.columns([2, 2, 1])
     with top_col1:
         start_date = st.date_input(
-            "Start Date", value=dt.now().date() - timedelta(days=14)
+            "Start Date", value=dt.now().date() - timedelta(weeks=15)
         )
     with top_col2:
         end_date = st.date_input("End Date", value=dt.now().date() - timedelta(days=1))
@@ -47,97 +117,24 @@ async def fill_speed_analysis(clearinghouse: DriftClient):
         index=0,
     )
 
-    st.write("## Swift vs Normal Order Type Comparison")
-
-    swift_vs_normal_col1, swift_vs_normal_col2 = st.columns([4, 2])
-    with swift_vs_normal_col2:
-        st.write("**Chart Configuration:**")
-        comparison_percentiles = st.multiselect(
-            "Select Percentiles to Compare:",
-            options=[f"p{x}" for x in [10, 20, 25, 30, 40, 50, 60, 70, 75, 80, 90, 99]],
-            default=["p50", "p90", "p99"],
-            key="swift_normal_percentiles",
-        )
-
-        comparison_cohorts = st.selectbox(
-            "Select Cohorts to Compare:",
-            options=["0-1k", "1k-10k", "10k-100k", "100k+"],
-            index=0,
-        )
-
-        st.write("**Instructions:**")
-        st.write("• Compare swift vs normal orders")
-        st.write("• Select percentiles and cohorts above")
-
-    with swift_vs_normal_col1:
-        if comparison_percentiles and comparison_cohorts:
-            temp_order_type = st.session_state.order_type_filter
-            st.session_state.order_type_filter = "swift"
-            swift_data = await fetch_fill_speed_data(
-                start_date, end_date, selected_market
-            )
-            st.session_state.order_type_filter = "normal"
-            normal_data = await fetch_fill_speed_data(
-                start_date, end_date, selected_market
-            )
-
-            st.session_state.order_type_filter = temp_order_type
-            if (
-                swift_data is not None
-                and not swift_data.empty
-                and normal_data is not None
-                and not normal_data.empty
-            ):
-                swift_data["datetime"] = pd.to_datetime(swift_data["ts"], unit="s")
-                normal_data["datetime"] = pd.to_datetime(normal_data["ts"], unit="s")
-
-                swift_filtered = swift_data[
-                    swift_data["cohort"].isin([comparison_cohorts])
-                ]
-                normal_filtered = normal_data[
-                    normal_data["cohort"].isin([comparison_cohorts])
-                ]
-
-                fig_swift_vs_normal = create_swift_vs_normal_comparison_chart(
-                    swift_filtered, normal_filtered, comparison_percentiles
-                )
-                st.plotly_chart(
-                    fig_swift_vs_normal,
-                    use_container_width=True,
-                    key="swift_vs_normal_comparison",
-                )
-            else:
-                st.info(
-                    "Insufficient data for swift vs normal comparison. Try expanding the date range."
-                )
-        else:
-            st.info(
-                "Please select at least one percentile and one cohort for comparison."
-            )
-
     st.write("## Order Type Analysis")
-    order_type_options = ["normal", "swift", "all"]
-    selected_order_type = st.selectbox(
-        "Select Order Type:",
-        options=order_type_options,
-        index=order_type_options.index(st.session_state.order_type_filter),
-        key="order_type_selector",
-    )
-    st.session_state.order_type_filter = selected_order_type
 
-    fill_data = await fetch_fill_speed_data(start_date, end_date, selected_market)
+    fill_data = await fetch_fill_speed_data(start_date, end_date, selected_market, "all")
+    swift_fill_data = await fetch_fill_speed_data(start_date, end_date, selected_market, "swift")
+    non_swift_fill_data = await fetch_fill_speed_data(start_date, end_date, selected_market, "normal")
 
     if fill_data is None or fill_data.empty:
         st.error("No fill speed data available for the selected time range and markets")
         return
 
     fill_data["datetime"] = pd.to_datetime(fill_data["ts"], unit="s")
+    swift_fill_data["datetime"] = pd.to_datetime(swift_fill_data["ts"], unit="s")
+    non_swift_fill_data["datetime"] = pd.to_datetime(non_swift_fill_data["ts"], unit="s")
     filtered_data = apply_filters(fill_data)
 
     if (
         st.session_state.date_filter
         or st.session_state.performance_filter
-        or st.session_state.order_type_filter
     ):
         filter_info = []
         if st.session_state.date_filter:
@@ -155,8 +152,6 @@ async def fill_speed_analysis(clearinghouse: DriftClient):
             filter_info.append(
                 f"P90: {st.session_state.performance_filter[0]:.2f}% auction duration to {st.session_state.performance_filter[1]:.2f}% auction duration"
             )
-        if st.session_state.order_type_filter:
-            filter_info.append(f"Order Type: {st.session_state.order_type_filter}")
 
         st.info(
             f"🔍 Active filters: {' | '.join(filter_info)} ({len(filtered_data)}/{len(fill_data)} data points)"
@@ -177,27 +172,54 @@ async def fill_speed_analysis(clearinghouse: DriftClient):
     overall_metrics_row1_col1, overall_metrics_row1_col2 = st.columns(2)
     with overall_metrics_row1_col1:
         st.metric("Number of Days", f"{num_days_with_data}")
-        st.metric("Number of samples in period", f"{fill_data['count'].sum()}")
+        # Clean and convert count column to numeric before summing (defensive programming)
+        if "count" in fill_data.columns:
+            count_numeric = pd.to_numeric(fill_data["count"], errors='coerce')
+            # Filter out unreasonably large values (likely corrupted data)
+            count_numeric = count_numeric.where(count_numeric <= 10000000, np.nan)
+            total_samples = count_numeric.sum()
+            if pd.isna(total_samples):
+                total_samples = 0
+            st.metric("Number of samples in period", f"{int(total_samples):,}")
+        else:
+            st.metric("Number of samples in period", "N/A")
     with overall_metrics_row1_col2:
-        if not filtered_data.empty:
-            avg_median = filtered_data["p50"].mean()
+        if not filtered_data.empty and "p50" in filtered_data.columns:
+            # Ensure p50 is numeric before calculating mean
+            p50_numeric = pd.to_numeric(filtered_data["p50"], errors='coerce')
+            avg_median = p50_numeric.mean()
             st.metric("Avg Median Fill Time", f"{avg_median:.2f}% auction duration")
         else:
             st.metric("Avg Median Fill Time", "N/A")
 
     overall_metrics_row2_col1, overall_metrics_row2_col2 = st.columns(2)
     with overall_metrics_row2_col1:
-        if not filtered_data.empty:
-            avg_p90 = filtered_data["p90"].mean()
+        if not filtered_data.empty and "p90" in filtered_data.columns:
+            # Ensure p90 is numeric before calculating mean
+            p90_numeric = pd.to_numeric(filtered_data["p90"], errors='coerce')
+            avg_p90 = p90_numeric.mean()
             st.metric("Avg P90 Fill Time", f"{avg_p90:.2f}% auction duration")
         else:
             st.metric("Avg P90 Fill Time", "N/A")
     with overall_metrics_row2_col2:
-        if not filtered_data.empty:
-            avg_p99 = filtered_data["p99"].mean()
+        if not filtered_data.empty and "p99" in filtered_data.columns:
+            # Ensure p99 is numeric before calculating mean
+            p99_numeric = pd.to_numeric(filtered_data["p99"], errors='coerce')
+            avg_p99 = p99_numeric.mean()
             st.metric("Avg P99 Fill Time", f"{avg_p99:.2f}% auction duration")
         else:
             st.metric("Avg P99 Fill Time", "N/A")
+
+
+    st.write(
+        "#### Daily Fill Speed Distribution by Individual Cohort (Detailed Box Plots)"
+    )
+    
+    if not filtered_data.empty:
+        plot_fill_speed_box_plot_over_time(non_swift_fill_data, "Daily Fill Speed Distribution (Normal)")
+        plot_fill_speed_box_plot_over_time(swift_fill_data, "Daily Fill Speed Distribution (Swift)")
+    else:
+        st.info("No data available to display individual cohort daily box plots.")
 
     cohort_pxx_col1, cohort_pxx_col2 = st.columns([4, 2])
     with cohort_pxx_col1:
@@ -283,7 +305,7 @@ async def fill_speed_analysis(clearinghouse: DriftClient):
         selected_cohort_heatmap_colorscale = st.selectbox(
             "Color Scale for Cohort Heatmaps:",
             options=["Viridis", "Plasma", "Inferno", "RdYlBu_r", "RdBu_r"],
-            index=0,
+            index=3,
             key="cohort_heatmap_colorscale_selector",
             help="Select a common color scale for the 2x2 cohort heatmaps.",
         )
@@ -321,44 +343,6 @@ async def fill_speed_analysis(clearinghouse: DriftClient):
     else:
         st.info("No data available to display individual cohort box plots.")
 
-    st.write(
-        "#### Daily Fill Speed Distribution by Individual Cohort (Detailed Box Plots)"
-    )
-    if "share_y_axes_individual_cohort_daily_boxes" not in st.session_state:
-        st.session_state.share_y_axes_individual_cohort_daily_boxes = False
-
-    st.session_state.share_y_axes_individual_cohort_daily_boxes = st.toggle(
-        "🔗 Share Y-Axis Across Cohort Daily Box Plots",
-        value=st.session_state.share_y_axes_individual_cohort_daily_boxes,
-        key="toggle_share_y_cohort_daily_boxes",
-    )
-    if not filtered_data.empty:
-        required_cols_for_daily_box = [
-            "min",
-            "p25",
-            "p50",
-            "p75",
-            "max",
-            "count",
-            "datetime",
-            "cohort",
-        ]
-        if all(col in filtered_data.columns for col in required_cols_for_daily_box):
-            fig_individual_cohort_daily_boxes = create_individual_cohort_daily_box_subplots(
-                filtered_data,
-                share_y_axes=st.session_state.share_y_axes_individual_cohort_daily_boxes,
-            )
-            st.plotly_chart(
-                fig_individual_cohort_daily_boxes,
-                use_container_width=True,
-                key="individual_cohort_daily_box_subplots",
-            )
-        else:
-            st.info(
-                "Required data columns (min, p25, p50, p75, max, count) not available for daily cohort box plots."
-            )
-    else:
-        st.info("No data available to display individual cohort daily box plots.")
 
     st.write("#### Key Metrics by Cohort")
     cohort_order = ["0-1k", "1k-10k", "10k-100k", "100k+"]
@@ -381,28 +365,57 @@ async def fill_speed_analysis(clearinghouse: DriftClient):
                 num_days_cohort = (
                     cohort_specific_data["datetime"].dt.normalize().nunique()
                 )
-                avg_median_cohort = cohort_specific_data["p50"].mean()
-                avg_p90_cohort = cohort_specific_data["p90"].mean()
-                avg_p99_cohort = cohort_specific_data["p99"].mean()
-                fast_fills_pct_cohort = (cohort_specific_data["p80"] < 1.0).mean() * 100
+                
+                # Safe calculations with column existence checks and numeric conversion
+                if "p50" in cohort_specific_data.columns:
+                    p50_numeric = pd.to_numeric(cohort_specific_data["p50"], errors='coerce')
+                    avg_median_cohort = p50_numeric.mean()
+                else:
+                    avg_median_cohort = None
+                    
+                if "p90" in cohort_specific_data.columns:
+                    p90_numeric = pd.to_numeric(cohort_specific_data["p90"], errors='coerce')
+                    avg_p90_cohort = p90_numeric.mean()
+                else:
+                    avg_p90_cohort = None
+                    
+                if "p99" in cohort_specific_data.columns:
+                    p99_numeric = pd.to_numeric(cohort_specific_data["p99"], errors='coerce')
+                    avg_p99_cohort = p99_numeric.mean()
+                else:
+                    avg_p99_cohort = None
+                    
+                if "p80" in cohort_specific_data.columns:
+                    p80_numeric = pd.to_numeric(cohort_specific_data["p80"], errors='coerce')
+                    fast_fills_pct_cohort = (p80_numeric < 1.0).mean() * 100
+                else:
+                    fast_fills_pct_cohort = None
 
                 st.metric("Number of Days", f"{num_days_cohort}")
-                st.metric("Avg Median", f"{avg_median_cohort:.2f}% auction duration")
-                st.metric("Avg P90", f"{avg_p90_cohort:.2f}% auction duration")
-                st.metric("Avg P99", f"{avg_p99_cohort:.2f}% auction duration")
+                st.metric("Avg Median", f"{avg_median_cohort:.2f}% auction duration" if avg_median_cohort is not None else "N/A")
+                st.metric("Avg P90", f"{avg_p90_cohort:.2f}% auction duration" if avg_p90_cohort is not None else "N/A")
+                st.metric("Avg P99", f"{avg_p99_cohort:.2f}% auction duration" if avg_p99_cohort is not None else "N/A")
                 st.metric(
-                    "Fast P80<1% auction duration", f"{fast_fills_pct_cohort:.1f}%"
+                    "Fast P80<1% auction duration", f"{fast_fills_pct_cohort:.1f}%" if fast_fills_pct_cohort is not None else "N/A"
                 )
-                st.metric(
-                    "Number of samples in period",
-                    f"{cohort_specific_data['count'].sum()}",
-                )
+                # Clean and convert count column to numeric before summing (defensive programming)
+                if "count" in cohort_specific_data.columns:
+                    count_numeric = pd.to_numeric(cohort_specific_data["count"], errors='coerce')
+                    # Filter out unreasonably large values (likely corrupted data)
+                    count_numeric = count_numeric.where(count_numeric <= 10000000, np.nan)
+                    cohort_total_samples = count_numeric.sum()
+                    if pd.isna(cohort_total_samples):
+                        cohort_total_samples = 0
+                    st.metric("Number of samples in period", f"{int(cohort_total_samples):,}")
+                else:
+                    st.metric("Number of samples in period", "N/A")
             else:
                 st.metric("Number of Days", "N/A")
                 st.metric("Avg Median", "N/A")
                 st.metric("Avg P90", "N/A")
                 st.metric("Avg P99", "N/A")
                 st.metric("Fast P80<1% auction duration", "N/A")
+                st.metric("Number of samples in period", "N/A")
             st.divider()
 
     st.markdown("<br>", unsafe_allow_html=True)  # Add some space
@@ -423,29 +436,99 @@ async def fill_speed_analysis(clearinghouse: DriftClient):
         st.write("• Double-click to zoom")
 
     with overall_perf_col1:
-        daily_avg_data = (
-            filtered_data.groupby(pd.Grouper(key="datetime", freq="D"))[
-                [
-                    "p10",
-                    "p20",
-                    "p25",
-                    "p30",
-                    "p40",
-                    "p50",
-                    "p60",
-                    "p70",
-                    "p75",
-                    "p80",
-                    "p90",
-                    "p99",
-                    "min",
-                    "max",
-                    "count",
-                ]
-            ]
-            .mean()
-            .reset_index()
-        )
+        # Define the columns we want to aggregate - only include those that exist and are numeric
+        desired_cols = [
+            "p10", "p20", "p25", "p30", "p40", "p50", "p60", "p70", "p75", "p80", "p90", "p99",
+            "min", "max", "count"
+        ]
+        
+        # Filter to only include columns that exist in the dataframe
+        available_cols = [col for col in desired_cols if col in filtered_data.columns]
+        
+        if not available_cols:
+            st.error("No numeric columns available for aggregation")
+            return
+        
+        # More robust data cleaning and conversion
+        numeric_data = filtered_data.copy()
+        
+        # Debug: Show data types before conversion
+        with st.expander("Debug: Data Types Before Conversion", expanded=False):
+            st.write("Column data types:")
+            for col in available_cols:
+                if col in numeric_data.columns:
+                    st.write(f"- {col}: {numeric_data[col].dtype}")
+                    sample_values = numeric_data[col].dropna().head(5).tolist()
+                    st.write(f"  Sample values: {sample_values}")
+        
+        # Convert each column individually with more aggressive cleaning
+        cleaned_cols = []
+        for col in available_cols:
+            try:
+                # First, handle any obvious string issues
+                series = numeric_data[col].astype(str)
+                
+                # Remove any non-numeric characters except decimal points and negative signs
+                series = series.str.replace(r'[^\d.-]', '', regex=True)
+                
+                # Convert to numeric, coercing errors to NaN
+                numeric_series = pd.to_numeric(series, errors='coerce')
+                
+                # For percentile columns, filter out unreasonably large values
+                if col.startswith('p') and col[1:].isdigit():
+                    numeric_series = numeric_series.where(numeric_series <= 10000, np.nan)
+                elif col == 'count':
+                    numeric_series = numeric_series.where(numeric_series <= 1000000, np.nan)
+                
+                # Only keep the column if we have some valid numeric values
+                if not numeric_series.dropna().empty:
+                    numeric_data[col] = numeric_series
+                    cleaned_cols.append(col)
+            except Exception:
+                # Skip problematic columns
+                continue
+        
+        # Update available_cols to only include successfully cleaned columns
+        available_cols = cleaned_cols
+        
+        if not available_cols:
+            st.error("No columns could be successfully converted to numeric format")
+            return
+        
+        # Debug: Show data types after conversion
+        with st.expander("Debug: Data Types After Conversion", expanded=False):
+            st.write("Successfully converted columns:")
+            for col in available_cols:
+                st.write(f"- {col}: {numeric_data[col].dtype}")
+                valid_count = numeric_data[col].dropna().shape[0]
+                total_count = numeric_data[col].shape[0]
+                st.write(f"  Valid values: {valid_count}/{total_count}")
+        
+        # Final safety check: ensure we still have the datetime column for grouping
+        if "datetime" not in numeric_data.columns:
+            st.error("datetime column is missing - cannot perform time-based aggregation")
+            return
+        
+        try:
+            # Group by date and calculate mean for numeric columns only
+            daily_avg_data = (
+                numeric_data.groupby(pd.Grouper(key="datetime", freq="D"))[available_cols]
+                .mean()
+                .reset_index()
+            )
+        except Exception as e:
+            st.error(f"Error during aggregation: {e}")
+            st.write("Attempting alternative aggregation method...")
+            
+            # Alternative approach: aggregate manually
+            numeric_data['date'] = numeric_data['datetime'].dt.date
+            daily_avg_data = numeric_data.groupby('date')[available_cols].mean().reset_index()
+            daily_avg_data['datetime'] = pd.to_datetime(daily_avg_data['date'])
+            daily_avg_data = daily_avg_data.drop('date', axis=1)
+        
+        if daily_avg_data.empty:
+            st.error("No data available after aggregation")
+            return
 
         fig_timeseries = create_timeseries_chart(daily_avg_data)  # Pass aggregated data
         timeseries_selection = st.plotly_chart(
@@ -558,6 +641,7 @@ async def fill_speed_analysis(clearinghouse: DriftClient):
     else:
         st.info("Min/max data not available for enhanced daily box plots.")
 
+'''
     with st.expander("Debug max value info"):
         st.write("## Maximum Values Analysis")
         st.write("Find the absolute maximum values and trace their origins")
@@ -676,7 +760,7 @@ async def fill_speed_analysis(clearinghouse: DriftClient):
                         st.error(f"Error fetching API data: {e}")
         else:
             st.info("No data available for maximum values analysis.")
-
+'''
 
 def apply_filters(data):
     """Apply session state filters to the data"""
@@ -692,14 +776,6 @@ def apply_filters(data):
         min_p90, max_p90 = st.session_state.performance_filter
         filtered = filtered[(filtered["p90"] >= min_p90) & (filtered["p90"] <= max_p90)]
 
-    if (
-        st.session_state.order_type_filter
-        and st.session_state.order_type_filter != "all"
-    ):
-        filtered = filtered[
-            filtered["order_type"] == st.session_state.order_type_filter
-        ]
-
     return filtered
 
 
@@ -710,8 +786,46 @@ def create_heatmap_data(data):
     percentile_cols = [
         f"p{p}" for p in [10, 20, 25, 30, 40, 50, 60, 70, 75, 80, 90, 99]
     ]
+    
+    # Filter to only include columns that exist in the dataframe
+    available_percentile_cols = [col for col in percentile_cols if col in data.columns]
+    
+    if not available_percentile_cols:
+        # Return empty dataframe with expected structure if no percentile columns found
+        return pd.DataFrame(columns=['date'] + percentile_cols)
+    
+    # More robust numeric conversion
+    numeric_data = data.copy()
+    cleaned_cols = []
+    
+    for col in available_percentile_cols:
+        try:
+            # Convert to string first, then clean and convert to numeric
+            series = numeric_data[col].astype(str)
+            series = series.str.replace(r'[^\d.-]', '', regex=True)
+            numeric_series = pd.to_numeric(series, errors='coerce')
+            
+            # For percentile columns, filter out unreasonably large values
+            if col.startswith('p') and col[1:].isdigit():
+                numeric_series = numeric_series.where(numeric_series <= 10000, np.nan)
+            elif col == 'count':
+                numeric_series = numeric_series.where(numeric_series <= 1000000, np.nan)
+            
+            if not numeric_series.dropna().empty:
+                numeric_data[col] = numeric_series
+                cleaned_cols.append(col)
+        except Exception:
+            # Skip problematic columns
+            continue
+    
+    if not cleaned_cols:
+        return pd.DataFrame(columns=['date'] + percentile_cols)
 
-    heatmap_df = data.groupby("date")[percentile_cols].mean().reset_index()
+    try:
+        heatmap_df = numeric_data.groupby("date")[cleaned_cols].mean().reset_index()
+    except Exception:
+        # Return empty dataframe if aggregation fails
+        return pd.DataFrame(columns=['date'] + percentile_cols)
 
     heatmap_df["datetime_temp"] = pd.to_datetime(heatmap_df["date"])
     heatmap_df["day_of_week"] = heatmap_df["datetime_temp"].dt.day_name()
@@ -853,8 +967,19 @@ def create_trends_chart(data):
 
     if window > 1:
         data = data.copy()
-        data["p50_rolling"] = data["p50"].rolling(window=window, center=True).mean()
-        data["p90_rolling"] = data["p90"].rolling(window=window, center=True).mean()
+        
+        # Safe rolling mean calculations with column existence checks
+        if "p50" in data.columns:
+            p50_numeric = pd.to_numeric(data["p50"], errors='coerce')
+            data["p50_rolling"] = p50_numeric.rolling(window=window, center=True).mean()
+        else:
+            data["p50_rolling"] = None
+            
+        if "p90" in data.columns:
+            p90_numeric = pd.to_numeric(data["p90"], errors='coerce')
+            data["p90_rolling"] = p90_numeric.rolling(window=window, center=True).mean()
+        else:
+            data["p90_rolling"] = None
 
         fig = make_subplots(
             rows=2,
@@ -1045,193 +1170,41 @@ def handle_timeseries_range_selection(range_data, data):
         st.error(f"Error processing range selection: {e}")
 
 
-@st.cache_data(ttl=600)  # Cache for 10 minutes
-def _fetch_single_cohort_data(api_url: str, params: dict, cohort_display_name: str):
-    """Fetch data for a single cohort from the API. Cached."""
-    url = f"{api_url}?{urllib.parse.urlencode(params)}"
-    print(f"Fetching: {cohort_display_name}")
-    try:
-        response = requests.get(url, timeout=30)
-        response.raise_for_status()
-        api_data = response.json()
-        print(
-            f"Got {len(api_data.get('records', []))} records for {cohort_display_name}"
+async def fetch_fill_speed_data(start_date, end_date, selected_market, order_type):
+    """Fetch and process fill speed data from DynamoDB."""
+    
+    start_ts = int(dt.combine(start_date, dt.min.time()).timestamp())
+    end_ts = int(dt.combine(end_date, dt.max.time()).timestamp())
+    
+    # Fetch data for all cohorts
+    all_cohorts = ["0", "1000", "10000", "100000"]
+    cohort_data = {}
+    
+    for cohort in all_cohorts:
+        data_df = fetch_fill_speed_data_dynamodb(
+            start_ts, end_ts, selected_market, order_type, cohort
         )
+        if data_df is not None and not data_df.empty:
+            cohort_data[cohort] = data_df
 
-        if not api_data.get("success") or not api_data.get("records"):
-            print(
-                f"API returned no successful records for cohort {cohort_display_name}."
-            )
-            return []
-        return api_data["records"]
-    except requests.exceptions.RequestException as e:
-        print(f"API request failed for cohort {cohort_display_name}: {e}")
-        return []
-    except Exception as e:
-        print(f"Error processing data from API: {e}")
-        return []
-
-
-async def fetch_fill_speed_data(start_date, end_date, selected_market):
-    """Fetch and process fill speed data from the new API format using ThreadPool for concurrent requests."""
-
-    # this is to disable an annoying warning in the console that streamlit has when calling functions in threadspool
-    # read about it: https://discuss.streamlit.io/t/warning-for-missing-scriptruncontext/83893/15
-    for name, logger_item in logging.root.manager.loggerDict.items():
-        if "streamlit" in name:
-            logger_item.disabled = True
-
-    api_cohort_to_display_cohort = {
-        "0": "0-1k",
-        "1000": "1k-10k",
-        "10000": "10k-100k",
-        "100000": "100k+",
-    }
-    api_cohort_values_to_query = ["0", "1000", "10000", "100000"]
-
-    if st.session_state.order_type_filter == "all":
-        bit_flag_api_values = ["all"]
-        bit_flag_display_map = {"all": "all"}
-    elif st.session_state.order_type_filter == "normal":
-        bit_flag_api_values = [0]
-        bit_flag_display_map = {0: "normal"}
-    elif st.session_state.order_type_filter == "swift":
-        bit_flag_api_values = [1]
-        bit_flag_display_map = {1: "swift"}
-    else:
-        bit_flag_api_values = ["all"]
-        bit_flag_display_map = {"all": "all"}
-
-    percentile_cols = [
-        f"p{p}" for p in [10, 20, 25, 30, 40, 50, 60, 70, 75, 80, 90, 99]
-    ]
-    all_processed_data = []
-    market_to_query = selected_market
-
-    try:
-        api_tasks = []
-
-        for cohort_value in api_cohort_values_to_query:
-            for bit_flag_api_val in bit_flag_api_values:
-                current_chunk_start_date = start_date
-                cohort_display_name = api_cohort_to_display_cohort.get(
-                    cohort_value, cohort_value
-                )
-                order_type_display_name = bit_flag_display_map[bit_flag_api_val]
-
-                while current_chunk_start_date <= end_date:
-                    chunk_end_date = current_chunk_start_date + timedelta(days=99)
-                    if chunk_end_date > end_date:
-                        chunk_end_date = end_date
-
-                    chunk_start_ts = int(
-                        dt.combine(current_chunk_start_date, dt.min.time()).timestamp()
-                    )
-                    chunk_end_ts = int(
-                        dt.combine(chunk_end_date, dt.max.time()).timestamp()
-                    )
-
-                    api_url_base = f"https://data-staging.api.drift.trade/stats/{market_to_query}/analytics/auctionLatency/D/{cohort_value}/{bit_flag_api_val}"
-                    params = {
-                        "startTs": chunk_start_ts,
-                        "endTs": chunk_end_ts,
-                        "limit": 100,
-                    }
-
-                    api_tasks.append(
-                        {
-                            "api_url": api_url_base,
-                            "params": params,
-                            "cohort_display_name": f"{cohort_display_name} ({order_type_display_name})",
-                            "cohort_value": cohort_value,
-                            "bit_flag_api_val": bit_flag_api_val,
-                            "api_cohort_to_display_cohort": api_cohort_to_display_cohort,
-                            "bit_flag_display_map": bit_flag_display_map,
-                        }
-                    )
-
-                    current_chunk_start_date = chunk_end_date + timedelta(days=1)
-
-        with ThreadPoolExecutor(max_workers=8) as executor:
-            # Create futures with Streamlit context
-            futures = []
-            for task in api_tasks:
-                future = executor.submit(
-                    _fetch_single_cohort_data,
-                    task["api_url"],
-                    task["params"],
-                    task["cohort_display_name"],
-                )
-                # Add Streamlit context to the thread
-                add_script_run_ctx(future)
-                futures.append((future, task))
-
-            failed_requests = []
-            for future, task in futures:
-                try:
-                    raw_records = future.result()
-                    if not raw_records:
-                        continue
-
-                    for record in raw_records:
-                        transformed_record = {}
-                        transformed_record["ts"] = record["ts"]
-                        transformed_record["datetime"] = pd.to_datetime(
-                            record["ts"], unit="s"
-                        ).replace(hour=12, minute=0, second=0, microsecond=0)
-                        transformed_record["cohort"] = task[
-                            "api_cohort_to_display_cohort"
-                        ].get(str(record["cohort"]), "Unknown")
-                        transformed_record["order_type"] = task["bit_flag_display_map"][
-                            task["bit_flag_api_val"]
-                        ]
-
-                        for field in ["count", "min", "max"]:
-                            raw_val = record.get(field)
-                            if raw_val is not None and raw_val != "NaN":
-                                if field == "count":
-                                    transformed_record[field] = int(raw_val)
-                                else:
-                                    transformed_record[field] = float(raw_val) * 100
-                            else:
-                                transformed_record[field] = np.nan
-
-                        for p_col in percentile_cols:
-                            raw_val = record.get(p_col)
-                            if raw_val is not None and raw_val != "NaN":
-                                transformed_record[p_col] = float(raw_val) * 100
-                            else:
-                                transformed_record[p_col] = np.nan
-
-                        all_processed_data.append(transformed_record)
-
-                except Exception as e:
-                    failed_requests.append(f"{task['cohort_display_name']}: {e}")
-
-        # Show any failures after ThreadPool is done
-        if failed_requests:
-            st.warning("Some API requests failed:\n" + "\n".join(failed_requests[:5]))
-            if len(failed_requests) > 5:
-                st.warning(f"... and {len(failed_requests) - 5} more failures")
-
-        if not all_processed_data:
-            st.info(
-                "No records returned from the API for the selected criteria after checking all cohorts."
-            )
-            return pd.DataFrame()
-
-        df = pd.DataFrame(all_processed_data)
-        return df
-
-    except Exception as e:
-        st.error(f"An unexpected error occurred while fetching or processing data: {e}")
+    if not cohort_data:
+        st.warning(
+            "No data available for the selected criteria. Try a different date range or market."
+        )
         return pd.DataFrame()
 
-    finally:
-        # restore the dumb streamlit thing
-        for name, logger_item in logging.root.manager.loggerDict.items():
-            if "streamlit" in name:
-                logger_item.disabled = False
+    # Combine all cohort data
+    all_processed_data = []
+    for cohort, data_df in cohort_data.items():
+        all_processed_data.append(data_df)
+    
+    if not all_processed_data:
+        return pd.DataFrame()
+    
+    # Combine all DataFrames
+    combined_df = pd.concat(all_processed_data, ignore_index=True)
+    
+    return combined_df
 
 
 def create_all_cohorts_comparison_chart(data, selection_mode):
@@ -1432,21 +1405,58 @@ def create_individual_cohort_heatmap_subplots(data, common_color_scale):
         if not cohort_data.empty:
             cohort_data["date"] = cohort_data["datetime"].dt.date
 
+            # Filter to only include columns that exist in the dataframe
+            available_percentile_cols = [col for col in percentile_cols if col in cohort_data.columns]
+            
+            if not available_percentile_cols:
+                continue  # Skip this cohort if no percentile columns are available
+            
+            # More robust numeric conversion
+            numeric_cohort_data = cohort_data.copy()
+            cleaned_cols = []
+            
+            for col in available_percentile_cols:
+                try:
+                    # Convert to string first, then clean and convert to numeric
+                    series = numeric_cohort_data[col].astype(str)
+                    series = series.str.replace(r'[^\d.-]', '', regex=True)
+                    numeric_series = pd.to_numeric(series, errors='coerce')
+                    
+                    # For percentile columns, filter out unreasonably large values
+                    if col.startswith('p') and col[1:].isdigit():
+                        numeric_series = numeric_series.where(numeric_series <= 10000, np.nan)
+                    elif col == 'count':
+                        numeric_series = numeric_series.where(numeric_series <= 1000000, np.nan)
+                    
+                    if not numeric_series.dropna().empty:
+                        numeric_cohort_data[col] = numeric_series
+                        cleaned_cols.append(col)
+                except Exception:
+                    # Skip problematic columns
+                    continue
+            
+            if not cleaned_cols:
+                continue  # Skip this cohort if no valid columns
+
             # Aggregate by date to handle duplicate dates (from different order types)
-            cohort_data_agg = (
-                cohort_data.groupby("date")[percentile_cols].mean().reset_index()
-            )
+            try:
+                cohort_data_agg = (
+                    numeric_cohort_data.groupby("date")[cleaned_cols].mean().reset_index()
+                )
+            except Exception:
+                continue  # Skip this cohort if aggregation fails
+
             dates = sorted(cohort_data_agg["date"].unique())
 
             z_matrix = []
-            for p_col in percentile_cols:
+            for p_col in cleaned_cols:
                 row_values = (
                     cohort_data_agg.set_index("date")[p_col].reindex(dates).values
                 )
                 z_matrix.append(row_values)
 
             hover_text = []
-            for r_idx, percentile_label in enumerate(percentile_cols):
+            for r_idx, percentile_label in enumerate(cleaned_cols):
                 hover_row = []
                 for c_idx, date_val in enumerate(dates):
                     value = z_matrix[r_idx][c_idx]
@@ -1463,7 +1473,7 @@ def create_individual_cohort_heatmap_subplots(data, common_color_scale):
                 go.Heatmap(
                     z=z_matrix,
                     x=[str(date) for date in dates],
-                    y=[p.upper() for p in percentile_cols],
+                    y=[p.upper() for p in cleaned_cols],
                     colorscale=common_color_scale,
                     hoverongaps=False,
                     hovertemplate="%{text}<extra></extra>",
@@ -1613,164 +1623,6 @@ def create_daily_box_plots(data):
     return fig
 
 
-def create_individual_cohort_daily_box_subplots(data, share_y_axes=False):
-    """Create a 2x2 grid of daily box plots, one for each cohort, using min/max/percentile data."""
-    cohort_order = ["0-1k", "1k-10k", "10k-100k", "100k+"]
-    fig = make_subplots(
-        rows=2,
-        cols=2,
-        subplot_titles=[f"Daily Boxes - Cohort: {c}" for c in cohort_order],
-        shared_xaxes=True,
-        shared_yaxes=share_y_axes,
-        vertical_spacing=0.15,
-        horizontal_spacing=0.05,
-    )
-
-    all_y_values_for_shared_axis = []
-    # Columns required from the data for each day's box plot
-    required_cols_for_box = ["min", "p25", "p50", "p75", "max", "count", "datetime"]
-
-    for i, cohort in enumerate(cohort_order):
-        cohort_data_full = data[data["cohort"] == cohort].copy()
-        row_idx = (i // 2) + 1
-        col_idx = (i % 2) + 1
-
-        # Check if essential columns exist for this cohort's data
-        if not all(col in cohort_data_full.columns for col in required_cols_for_box):
-            fig.add_annotation(
-                text="Missing required data columns",
-                row=row_idx,
-                col=col_idx,
-                showarrow=False,
-                font=dict(size=10),
-            )
-            continue
-
-        # Filter for rows where all necessary values for a box are present
-        cohort_data_valid_rows = cohort_data_full.dropna(
-            subset=["min", "p25", "p50", "p75", "max", "datetime"]
-        )
-
-        if cohort_data_valid_rows.empty:
-            fig.add_annotation(
-                text="No valid daily data for boxes",
-                row=row_idx,
-                col=col_idx,
-                showarrow=False,
-                font=dict(size=10),
-            )
-            continue
-
-        cohort_data_sorted = cohort_data_valid_rows.sort_values("datetime")
-
-        for _, day_data in cohort_data_sorted.iterrows():
-            date_str = day_data["datetime"].strftime("%Y-%m-%d")
-
-            try:
-                q1_val = float(day_data["p25"])
-                median_val = float(day_data["p50"])
-                q3_val = float(day_data["p75"])
-                min_val = float(day_data["min"])
-                max_val = float(day_data["max"])
-                count_val = (
-                    int(day_data["count"]) if pd.notna(day_data["count"]) else "N/A"
-                )
-            except (ValueError, TypeError) as e:
-                print(
-                    f"Skipping day {date_str} for cohort {cohort} due to data conversion error: {e}"
-                )
-                continue
-
-            fig.add_trace(
-                go.Box(
-                    x=[date_str],
-                    q1=[q1_val],
-                    median=[median_val],
-                    q3=[q3_val],
-                    lowerfence=[min_val],
-                    upperfence=[max_val],
-                    name=date_str,  # Name for potential legend (though usually hidden for many boxes)
-                    showlegend=False,
-                    boxpoints=False,  # Do not show individual points beyond whiskers
-                    hovertemplate=(
-                        f"Date: {date_str}<br>"
-                        f"Cohort: {cohort}<br>"
-                        f"Min: {min_val:.2f}%<br>"
-                        f"P25: {q1_val:.2f}%<br>"
-                        f"Median: {median_val:.2f}%<br>"
-                        f"P75: {q3_val:.2f}%<br>"
-                        f"Max: {max_val:.2f}%<br>"
-                        f"Count: {count_val}<extra></extra>"
-                    ),
-                ),
-                row=row_idx,
-                col=col_idx,
-            )
-            if share_y_axes:
-                # Collect all values that define the vertical extent of the boxes
-                current_day_values = [
-                    val
-                    for val in [min_val, q1_val, median_val, q3_val, max_val]
-                    if pd.notna(val)
-                ]
-                all_y_values_for_shared_axis.extend(current_day_values)
-
-        fig.update_xaxes(type="category", tickangle=45, row=row_idx, col=col_idx)
-        fig.update_yaxes(
-            title_text="Fill Time (% auction duration)", row=row_idx, col=col_idx
-        )
-
-    if share_y_axes and all_y_values_for_shared_axis:
-        # Filter out any non-numeric or NaN values that might have slipped in
-        all_y_values_for_shared_axis = [
-            v
-            for v in all_y_values_for_shared_axis
-            if isinstance(v, (int, float)) and pd.notna(v)
-        ]
-        if all_y_values_for_shared_axis:  # Check if list is not empty after filtering
-            global_y_min = min(all_y_values_for_shared_axis)
-            global_y_max = max(all_y_values_for_shared_axis)
-
-            # Consistent padding logic from create_individual_cohort_box_subplots
-            padded_min = (
-                global_y_min * 0.95 if global_y_min > 0 else global_y_min * 1.05
-            )
-            padded_max = global_y_max * 1.05
-
-            if global_y_min == 0 and padded_min != 0:  # Correct if min is 0
-                padded_min = 0
-
-            if padded_min == padded_max:
-                if global_y_min == 0:  # and global_y_max is also 0
-                    padded_min = -0.1
-                    padded_max = 0.1
-                else:  # Non-zero single value
-                    padding_abs = abs(global_y_min * 0.1) if global_y_min != 0 else 0.5
-                    padded_min = global_y_min - padding_abs
-                    padded_max = global_y_max + padding_abs
-
-            if padded_min > padded_max:  # Safety swap
-                padded_min, padded_max = padded_max, padded_min
-
-            # Ensure range is not zero after all adjustments
-            if padded_min == padded_max:
-                padded_min -= 0.1  # Final small nudge if still equal
-                padded_max += 0.1
-
-            fig.update_yaxes(range=[padded_min, padded_max])
-        else:  # If all values were filtered out
-            fig.update_yaxes(autorange=True)
-    else:  # Not sharing y-axes or no values to begin with
-        fig.update_yaxes(autorange=True)
-
-    fig.update_layout(
-        title_text="Daily Fill Speed Distribution by Order Size Cohort (Box Plots)",
-        height=800,
-        # No overall legend needed as hover provides info and boxes are self-explanatory by date
-    )
-    return fig
-
-
 def create_swift_vs_normal_comparison_chart(
     swift_data, normal_data, comparison_percentiles
 ):
@@ -1786,14 +1638,50 @@ def create_swift_vs_normal_comparison_chart(
         if data.empty:
             return pd.DataFrame()
 
+        # Filter comparison_percentiles to only include those that exist in the data
+        available_percentiles = [col for col in comparison_percentiles if col in data.columns]
+        
+        if not available_percentiles:
+            return pd.DataFrame()
+        
+        # More robust numeric conversion
+        numeric_data = data.copy()
+        cleaned_cols = []
+        
+        for col in available_percentiles:
+            try:
+                # Convert to string first, then clean and convert to numeric
+                series = numeric_data[col].astype(str)
+                series = series.str.replace(r'[^\d.-]', '', regex=True)
+                numeric_series = pd.to_numeric(series, errors='coerce')
+                
+                # For percentile columns, filter out unreasonably large values
+                if col.startswith('p') and col[1:].isdigit():
+                    numeric_series = numeric_series.where(numeric_series <= 10000, np.nan)
+                elif col == 'count':
+                    numeric_series = numeric_series.where(numeric_series <= 1000000, np.nan)
+                
+                if not numeric_series.dropna().empty:
+                    numeric_data[col] = numeric_series
+                    cleaned_cols.append(col)
+            except Exception:
+                # Skip problematic columns
+                continue
+        
+        if not cleaned_cols:
+            return pd.DataFrame()
+
         # Group by date and calculate average across all cohorts for each percentile
-        daily_avg = (
-            data.groupby(pd.Grouper(key="datetime", freq="D"))[comparison_percentiles]
-            .mean()
-            .reset_index()
-        )
-        daily_avg["order_type"] = order_type_name
-        return daily_avg
+        try:
+            daily_avg = (
+                numeric_data.groupby(pd.Grouper(key="datetime", freq="D"))[cleaned_cols]
+                .mean()
+                .reset_index()
+            )
+            daily_avg["order_type"] = order_type_name
+            return daily_avg
+        except Exception:
+            return pd.DataFrame()
 
     swift_daily = prepare_data(swift_data, "Swift")
     normal_daily = prepare_data(normal_data, "Normal")
