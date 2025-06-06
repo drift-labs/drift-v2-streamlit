@@ -26,6 +26,7 @@ from tabs.if_stakers import insurance_fund_page
 from tabs.imf import imf_page
 from tabs.liqcalc import liqcalc
 from tabs.liquidity import mm_page
+from tabs.liquidity_source import liquidity_source_analysis
 from tabs.logs import log_page
 from tabs.maker_tx_landing_analysis import maker_tx_landing_analysis
 from tabs.mm_program import mm_program_page
@@ -133,6 +134,7 @@ def main():
         "ACRED Stats",
         "Fill Speed Analysis",
         "Trigger Speed",
+        "Liquidity Source",
     )
 
     to_remove = [
@@ -388,6 +390,9 @@ def main():
         loop.run_until_complete(fill_speed_analysis(clearing_house))
     elif tab.lower() == "trigger speed":
         trigger_speed_analysis()
+    elif tab.lower() == "liquidity source":
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(liquidity_source_analysis(clearing_house))
     elif tab.lower() == "user-activity":
         loop = asyncio.new_event_loop()
         loop.run_until_complete(show_user_activity(clearing_house))
