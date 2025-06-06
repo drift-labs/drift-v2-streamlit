@@ -13,81 +13,18 @@ from plotly.subplots import make_subplots
 
 # Import DynamoDB utilities
 from utils.dynamodb_client import (
-    get_dynamodb_client,
-    get_fill_speed_pk,
     fetch_fill_speed_data_dynamodb
 )
 
-
-def plot_fill_speed_box_plot_over_time(filtered_data, title):
-    required_cols_for_daily_box = [
-        "min",
-        "p25",
-        "p50",
-        "p75",
-        "max",
-        "count",
-        "datetime",
-        "cohort",
-    ]
-    # Also check for p10 and p99 which are needed for the box plots
-    if "p10" in filtered_data.columns:
-        required_cols_for_daily_box.append("p10")
-    if "p99" in filtered_data.columns:
-        required_cols_for_daily_box.append("p99")
-
-    if "datetime" not in filtered_data.columns:
-        filtered_data["datetime"] = pd.to_datetime(filtered_data["ts"], unit="s")
-        
-    # if all(col in filtered_data.columns for col in required_cols_for_daily_box):
-    if True:
-        # Define colors for each cohort
-        cohort_colors = {
-            "0-1k": "blue",
-            "1k-10k": "red", 
-            "10k-100k": "green",
-            "100k+": "orange"
-        }
-        
-        # Create overlaid box plots for fill speed
-        fig_fill_speed_box = go.Figure()
-        
-        # Group data by cohort and create box plots for each day
-        cohort_order = ["0-1k", "1k-10k", "10k-100k", "100k+"]
-        for cohort in cohort_order:
-            cohort_data = filtered_data[filtered_data["cohort"] == cohort]
-            
-            for i, (_, row) in enumerate(cohort_data.iterrows()):
-                if not pd.isna(row.get("p10")) and not pd.isna(row.get("p99")):
-                    fig_fill_speed_box.add_trace(
-                        go.Box(
-                            x=[row["datetime"].strftime("%Y-%m-%d")],
-                            q1=[row.get("p25", row.get("p50", 0))],
-                            median=[row.get("p50", 0)],
-                            q3=[row.get("p75", row.get("p50", 0))],
-                            lowerfence=[row.get("p10", row.get("p50", 0))],
-                            upperfence=[row.get("p99", row.get("p50", 0))],
-                            mean=[row.get("p50", 0)],  # Use p50 as mean approximation
-                            name=f"Cohort {cohort}",
-                            legendgroup=f"cohort_{cohort}",
-                            showlegend=i == 0,  # Only show legend for first trace of each cohort
-                            boxpoints=False,
-                            marker_color=cohort_colors.get(cohort, 'blue'),
-                            line_color=cohort_colors.get(cohort, 'blue')
-                        )
-                    )
-
-        fig_fill_speed_box.update_layout(
-            title=title,
-            xaxis_title="Date",
-            yaxis_title="Fill Time (% auction duration)",
-            showlegend=True,
-        )
-        st.plotly_chart(fig_fill_speed_box, use_container_width=True)
-    else:
-        st.info(
-            "Required data columns (min, p25, p50, p75, max, count, p10, p99) not available for daily cohort box plots."
-        )
+cohort_colors = {
+    "0-1k": "blue",
+    "1k-10k": "red", 
+    "10k-100k": "green",
+    "100k+": "orange"
+}
+cohort_order = ["0-1k", "1k-10k", "10k-100k", "100k+"]
+cohorts = ["0", "1000", "10000", "100000"]
+cohort_labels = {"0": "0-1k", "1000": "1k-10k", "10000": "10k-100k", "100000": "100k+"}
 
 async def fill_speed_analysis(clearinghouse: DriftClient):
     st.write("# Fill Speed Analysis")
@@ -641,126 +578,70 @@ async def fill_speed_analysis(clearinghouse: DriftClient):
     else:
         st.info("Min/max data not available for enhanced daily box plots.")
 
-'''
-    with st.expander("Debug max value info"):
-        st.write("## Maximum Values Analysis")
-        st.write("Find the absolute maximum values and trace their origins")
 
-        if not filtered_data.empty:
-            max_analysis_col1, max_analysis_col2 = st.columns([3, 2])
+def plot_fill_speed_box_plot_over_time(filtered_data, title):
+    required_cols_for_daily_box = [
+        "min",
+        "p25",
+        "p50",
+        "p75",
+        "max",
+        "count",
+        "datetime",
+        "cohort",
+    ]
+    # Also check for p10 and p99 which are needed for the box plots
+    if "p10" in filtered_data.columns:
+        required_cols_for_daily_box.append("p10")
+    if "p99" in filtered_data.columns:
+        required_cols_for_daily_box.append("p99")
 
-            with max_analysis_col1:
-                # Find overall maximum
-                numeric_cols = ["min", "max"] + [
-                    f"p{p}" for p in [10, 20, 25, 30, 40, 50, 60, 70, 75, 80, 90, 99]
-                ]
-                available_cols = [
-                    col for col in numeric_cols if col in filtered_data.columns
-                ]
-
-                if available_cols:
-                    # Create a melted dataframe to find the absolute maximum
-                    max_data = []
-                    for col in available_cols:
-                        col_data = filtered_data[
-                            [col, "datetime", "cohort", "order_type", "count"]
-                        ].dropna(subset=[col])
-                        if not col_data.empty:
-                            max_idx = col_data[col].idxmax()
-                            max_row = col_data.loc[max_idx]
-                            max_data.append(
-                                {
-                                    "metric": col,
-                                    "value": max_row[col],
-                                    "datetime": max_row["datetime"],
-                                    "cohort": max_row["cohort"],
-                                    "order_type": max_row["order_type"],
-                                    "count": max_row["count"],
-                                }
-                            )
-
-                    if max_data:
-                        max_df = pd.DataFrame(max_data)
-                        absolute_max = max_df.loc[max_df["value"].idxmax()]
-
-                        st.metric(
-                            "Absolute Maximum Fill Time",
-                            f"{absolute_max['value']:.2f}% auction duration",
-                            help=f"Found in {absolute_max['metric']} metric",
+    if "datetime" not in filtered_data.columns:
+        filtered_data["datetime"] = pd.to_datetime(filtered_data["ts"], unit="s")
+        
+    # if all(col in filtered_data.columns for col in required_cols_for_daily_box):
+    if True:
+        # Define colors for each cohort
+        
+        # Create overlaid box plots for fill speed
+        fig_fill_speed_box = go.Figure()
+        
+        # Group data by cohort and create box plots for each day
+        for cohort in cohort_order:
+            cohort_data = filtered_data[filtered_data["cohort"] == cohort]
+            
+            for i, (_, row) in enumerate(cohort_data.iterrows()):
+                if not pd.isna(row.get("p10")) and not pd.isna(row.get("p99")):
+                    fig_fill_speed_box.add_trace(
+                        go.Box(
+                            x=[row["datetime"].strftime("%Y-%m-%d")],
+                            q1=[row.get("p25", row.get("p50", 0))],
+                            median=[row.get("p50", 0)],
+                            q3=[row.get("p75", row.get("p50", 0))],
+                            lowerfence=[row.get("p10", row.get("p50", 0))],
+                            upperfence=[row.get("p99", row.get("p50", 0))],
+                            mean=[row.get("p50", 0)],  # Use p50 as mean approximation
+                            name=f"Cohort {cohort}",
+                            legendgroup=f"cohort_{cohort}",
+                            showlegend=i == 0,  # Only show legend for first trace of each cohort
+                            boxpoints=False,
+                            marker_color=cohort_colors.get(cohort, 'blue'),
+                            line_color=cohort_colors.get(cohort, 'blue')
                         )
+                    )
 
-                        st.write("**Details of Maximum Value:**")
-                        st.write(f"• **Metric:** {absolute_max['metric'].upper()}")
-                        st.write(
-                            f"• **Value:** {absolute_max['value']:.3f}% auction duration"
-                        )
-                        st.write(
-                            f"• **Date:** {absolute_max['datetime'].strftime('%Y-%m-%d')}"
-                        )
-                        st.write(f"• **Cohort:** {absolute_max['cohort']}")
-                        st.write(f"• **Order Type:** {absolute_max['order_type']}")
-                        st.write(f"• **Sample Count:** {absolute_max['count']}")
+        fig_fill_speed_box.update_layout(
+            title=title,
+            xaxis_title="Date",
+            yaxis_title="Fill Time (% auction duration)",
+            showlegend=True,
+        )
+        st.plotly_chart(fig_fill_speed_box, use_container_width=True)
+    else:
+        st.info(
+            "Required data columns (min, p25, p50, p75, max, count, p10, p99) not available for daily cohort box plots."
+        )
 
-                        # Show top 10 highest values
-                        st.write("**Top 10 Highest Fill Time Values:**")
-                        top_10 = max_df.nlargest(10, "value")[
-                            ["metric", "value", "datetime", "cohort", "order_type"]
-                        ]
-                        top_10["value"] = top_10["value"].round(3)
-                        top_10["datetime"] = top_10["datetime"].dt.strftime("%Y-%m-%d")
-                        st.dataframe(top_10, use_container_width=True)
-
-            with max_analysis_col2:
-                st.write("**API Request Details:**")
-
-                # Show the API parameters that would have been used
-                max_row = filtered_data.loc[
-                    filtered_data[available_cols].max(axis=1).idxmax()
-                ]
-
-                cohort_api_map = {
-                    "0-1k": "0",
-                    "1k-10k": "1000",
-                    "10k-100k": "10000",
-                    "100k+": "100000",
-                }
-                order_type_api_map = {"normal": "0", "swift": "1", "all": "all"}
-
-                api_cohort = cohort_api_map.get(max_row["cohort"], "unknown")
-                api_order_type = order_type_api_map.get(
-                    max_row["order_type"], "unknown"
-                )
-
-                max_date = max_row["datetime"].date()
-                start_ts = int(dt.combine(max_date, dt.min.time()).timestamp())
-                end_ts = int(dt.combine(max_date, dt.max.time()).timestamp())
-
-                api_url = f"https://data-staging.api.drift.trade/stats/{selected_market}/analytics/auctionLatency/D/{api_cohort}/{api_order_type}"
-
-                st.write(f"**Base URL:** {api_url}")
-                st.write("**Parameters:**")
-                st.code(f"""startTs: {start_ts}
-    endTs: {end_ts}
-    limit: 100""")
-
-                full_url = f"{api_url}?startTs={start_ts}&endTs={end_ts}&limit=100"
-                st.write("**Full Request URL:**")
-                st.code(full_url)
-
-                if st.button("🔍 Show Raw API Response", key="show_api_response"):
-                    try:
-                        response = requests.get(full_url, timeout=10)
-                        if response.status_code == 200:
-                            api_data = response.json()
-                            st.write("**API Response:**")
-                            st.json(api_data)
-                        else:
-                            st.error(f"API request failed: {response.status_code}")
-                    except Exception as e:
-                        st.error(f"Error fetching API data: {e}")
-        else:
-            st.info("No data available for maximum values analysis.")
-'''
 
 def apply_filters(data):
     """Apply session state filters to the data"""
