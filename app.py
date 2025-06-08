@@ -20,6 +20,7 @@ from tabs.dlp import dlp
 from tabs.fee_income import fee_income_page
 from tabs.fees import fee_page
 from tabs.fill_speed import fill_speed_analysis
+from tabs.fill_metrics import fill_metrics_analysis
 from tabs.funding_history import funding_history
 from tabs.gpt import gpt_page
 from tabs.if_stakers import insurance_fund_page
@@ -133,6 +134,7 @@ def main():
         "Amplify Stats",
         "ACRED Stats",
         "Fill Speed Analysis",
+        "Fill Metrics",
         "Trigger Speed",
         "Liquidity Source",
     )
@@ -388,6 +390,9 @@ def main():
     elif tab.lower() == "fill speed analysis":
         loop = asyncio.new_event_loop()
         loop.run_until_complete(fill_speed_analysis(clearing_house))
+    elif tab.lower() == "fill metrics":
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(fill_metrics_analysis(clearing_house))
     elif tab.lower() == "trigger speed":
         trigger_speed_analysis()
     elif tab.lower() == "liquidity source":

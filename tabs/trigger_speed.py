@@ -287,10 +287,11 @@ def render_trigger_latency(toggle_use_p99, processed_cohort_data):
     
     with col1:
         trend_line_options = {
-            "All": ["slotsToFillP25", "slotsToFillP50", "slotsToFillP99"],
+            "All": ["slotsToFillP25", "slotsToFillP50", "slotsToFillP99", "slotsToFillAvg"],
             "P25 only": ["slotsToFillP25"],
             "P50 (Median) only": ["slotsToFillP50"], 
             "P99 only": ["slotsToFillP99"],
+            "Average only": ["slotsToFillAvg"],
             "None": []
         }
         
@@ -346,7 +347,8 @@ def render_trigger_latency(toggle_use_p99, processed_cohort_data):
     percentiles_config = {
         "slotsToFillP25": ("P25", "dash"),
         "slotsToFillP50": ("P50 (Median)", "solid"),
-        "slotsToFillP99": ("P99", "dot")
+        "slotsToFillP99": ("P99", "dot"),
+        "slotsToFillAvg": ("Average", "dashdot")
     }
     
     for cohort, data_df in processed_cohort_data.items():
@@ -472,10 +474,11 @@ def render_trigger_latency(toggle_use_p99, processed_cohort_data):
     
     with col1:
         fillvstrigger_trend_line_options = {
-            "All": ["fillVsTriggerP25", "fillVsTriggerP50", "fillVsTriggerP99"],
+            "All": ["fillVsTriggerP25", "fillVsTriggerP50", "fillVsTriggerP99", "fillVsTriggerAvg"],
             "P25 only": ["fillVsTriggerP25"],
             "P50 (Median) only": ["fillVsTriggerP50"], 
             "P99 only": ["fillVsTriggerP99"],
+            "Average only": ["fillVsTriggerAvg"],
             "None": []
         }
         
@@ -531,7 +534,8 @@ def render_trigger_latency(toggle_use_p99, processed_cohort_data):
     fillvstrigger_percentiles_config = {
         "fillVsTriggerP25": ("P25", "dash"),
         "fillVsTriggerP50": ("P50 (Median)", "solid"),
-        "fillVsTriggerP99": ("P99", "dot")
+        "fillVsTriggerP99": ("P99", "dot"),
+        "fillVsTriggerAvg": ("Average", "dashdot")
     }
     
     for cohort, data_df in processed_cohort_data.items():
