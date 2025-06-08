@@ -31,9 +31,9 @@ def get_trigger_order_fill_pk(
     """Generate the partition key for trigger order fill stats"""
     return f"ANALYTICS#TRIGGER_ORDER_FILL#{market}#{order_type}#{cohort}"
 
-def get_auction_latency_pk(market: str, cohort: str, bit_flags: str) -> str:
+def get_auction_latency_pk(market: str, cohort: str, bit_flags: str, taker_order_type: str, taker_order_direction: str) -> str:
     """Generate the partition key for auction latency stats"""
-    return f"ANALYTICS#AUCTION_LATENCY#{market}#D#{cohort}#{bit_flags}"
+    return f"ANALYTICS#AUCTION_LATENCY#{market}#D#{cohort}#{bit_flags}#{taker_order_type}#{taker_order_direction}"
 
 def get_fill_speed_pk(market: str, cohort: str, bit_flags: str) -> str:
     """Generate the partition key for fill speed stats (same as auction latency)"""
@@ -114,7 +114,7 @@ def fetch_trigger_speed_data_dynamodb(start_ts, end_ts, market_symbol, order_typ
         return pd.DataFrame()
 
 @st.cache_data(ttl=300)
-def fetch_auction_latency_data_dynamodb(start_ts, end_ts, market_symbol, bit_flags, cohort='1000'):
+def fetch_auction_latency_data_dynamodb(start_ts, end_ts, market_symbol, bit_flags, cohort='1000', taker_order_type='all', taker_order_direction='all'):
     """
     Fetch auction latency data from DynamoDB
     
@@ -124,6 +124,8 @@ def fetch_auction_latency_data_dynamodb(start_ts, end_ts, market_symbol, bit_fla
         market_symbol: Market symbol (e.g., 'SOL-PERP')
         bit_flags: Bit flags for the auction
         cohort: Cohort identifier (default '1000')
+        taker_order_type: Taker order type (default 'all')
+        taker_order_direction: Taker order direction (default 'all')
     """
     try:
         dynamodb = get_dynamodb_client()
@@ -135,7 +137,7 @@ def fetch_auction_latency_data_dynamodb(start_ts, end_ts, market_symbol, bit_fla
             
         table = dynamodb.Table(DYNAMODB_TABLE_NAME)
         
-        pk = get_auction_latency_pk(market_symbol, cohort, bit_flags)
+        pk = get_auction_latency_pk(market_symbol, cohort, bit_flags, taker_order_type, taker_order_direction)
         
         start_time = timeit.default_timer()
         
@@ -184,7 +186,7 @@ def fetch_auction_latency_data_dynamodb(start_ts, end_ts, market_symbol, bit_fla
         return pd.DataFrame()
 
 @st.cache_data(ttl=300)
-def fetch_fill_speed_data_dynamodb(start_ts, end_ts, market_symbol, order_type, cohort='0'):
+def fetch_fill_quality_data_dynamodb(start_ts, end_ts, market_symbol, order_type, cohort='0'):
     """
     Fetch fill speed data from DynamoDB (uses auction latency data)
     
@@ -371,5 +373,98 @@ def fetch_liquidity_source_data_dynamodb(start_ts, end_ts, market_symbol, cohort
         
     except Exception as e:
         st.error(f"❌ Error fetching liquidity source data from DynamoDB: {str(e)}")
+        st.error(f"Table: {DYNAMODB_TABLE_NAME}, Region: {DYNAMODB_REGION}")
+        return pd.DataFrame()
+
+@st.cache_data(ttl=300)
+def fetch_fill_metrics_data_dynamodb(start_ts, end_ts, market_symbol, cohort='all', taker_order_type='all', taker_order_direction='all', bit_flag='all'):
+    """
+    Fetch fill metrics data from DynamoDB (AuctionLatencyStats)
+    
+    Args:
+        start_ts: Start timestamp (Unix seconds)
+        end_ts: End timestamp (Unix seconds) 
+        market_symbol: Market symbol (e.g., 'SOL-PERP')
+        cohort: Cohort identifier (default 'all')
+        taker_order_type: Taker order type (default 'all')
+        taker_order_direction: Taker order direction (default 'all')
+        bit_flag: Bit flag (default 'all')
+    """
+    try:
+        dynamodb = get_dynamodb_client()
+        
+        # Check if client initialization failed
+        if dynamodb is None:
+            st.error("Cannot proceed without valid DynamoDB connection.")
+            return pd.DataFrame()
+            
+        table = dynamodb.Table(DYNAMODB_TABLE_NAME)
+        
+        pk = get_auction_latency_pk(market_symbol, cohort, bit_flag, taker_order_type, taker_order_direction)
+        
+        start_time = timeit.default_timer()
+        
+        # Collect all items with pagination
+        all_items = []
+        last_evaluated_key = None
+        page_count = 0
+        
+        while True:
+            page_count += 1
+            query_params = {
+                'KeyConditionExpression': Key('pk').eq(pk) & Key('sk').between(str(start_ts), str(end_ts)),
+                'ScanIndexForward': True
+            }
+            
+            if last_evaluated_key:
+                query_params['ExclusiveStartKey'] = last_evaluated_key
+            
+            response = table.query(**query_params)
+            
+            items = response.get('Items', [])
+            all_items.extend(items)
+            
+            # Check if there are more items to fetch
+            last_evaluated_key = response.get('LastEvaluatedKey')
+            if not last_evaluated_key:
+                break
+        
+        if not all_items:
+            st.warning(f"No records found in DynamoDB for PK: {pk} in the specified time range.")
+            return pd.DataFrame()
+        
+        # Convert to DataFrame
+        records_df = pd.DataFrame(all_items)
+        
+        # Convert sk back to ts for compatibility with existing code
+        if 'sk' in records_df.columns:
+            records_df['ts'] = pd.to_numeric(records_df['sk'], errors='coerce')
+            records_df.sort_values('ts', inplace=True)
+        
+        # Convert all numeric columns based on AuctionLatencyStats interface
+        numeric_columns = [
+            'auctionProgressCount', 'auctionProgressMin', 'auctionProgressMax', 'auctionProgressAvg',
+            'auctionProgressP10', 'auctionProgressP25', 'auctionProgressP50', 'auctionProgressP75', 'auctionProgressP99',
+            'fillVsOracleAbsMin', 'fillVsOracleAbsMax', 'fillVsOracleAbsAvg',
+            'fillVsOracleAbsP10', 'fillVsOracleAbsP25', 'fillVsOracleAbsP50', 'fillVsOracleAbsP75', 'fillVsOracleAbsP99',
+            'fillVsOracleAbsBpsMin', 'fillVsOracleAbsBpsMax', 'fillVsOracleAbsBpsAvg',
+            'fillVsOracleAbsBpsP10', 'fillVsOracleAbsBpsP25', 'fillVsOracleAbsBpsP50', 'fillVsOracleAbsBpsP75', 'fillVsOracleAbsBpsP99'
+        ]
+        
+        for col in numeric_columns:
+            if col in records_df.columns:
+                records_df[col] = pd.to_numeric(records_df[col], errors='coerce')
+        
+        # Add segment identifiers for easier filtering
+        records_df['market'] = market_symbol
+        records_df['cohort'] = cohort
+        records_df['takerOrderType'] = taker_order_type
+        records_df['takerOrderDirection'] = taker_order_direction
+        records_df['bitFlag'] = bit_flag
+        
+        return records_df
+        
+    except Exception as e:
+        st.error(f"❌ Error fetching fill metrics data from DynamoDB: {str(e)}")
         st.error(f"Table: {DYNAMODB_TABLE_NAME}, Region: {DYNAMODB_REGION}")
         return pd.DataFrame() 
