@@ -186,7 +186,7 @@ def fetch_auction_latency_data_dynamodb(start_ts, end_ts, market_symbol, bit_fla
         return pd.DataFrame()
 
 @st.cache_data(ttl=300)
-def fetch_fill_speed_data_dynamodb(start_ts, end_ts, market_symbol, order_type, cohort='0'):
+def fetch_fill_quality_data_dynamodb(start_ts, end_ts, market_symbol, order_type, cohort='0'):
     """
     Fetch fill speed data from DynamoDB (uses auction latency data)
     
