@@ -236,6 +236,25 @@ async def trade_flow_analysis(clearinghouse: DriftClient):
     #     [dedupdf(markets_data, nom, lookahead) for nom in market_selected]
     # )
 
+    with st.expander("Manual Bot/Retail Configuration"):
+        add_bots_str = st.text_area(
+            "Always treat as bot (one address per line):",
+            "BRksHqLiq2gvQw1XxsZq6DXZjD3GB5a9J63tUBgd6QS9",
+            help="These users will be classified as bots, overriding other criteria.",
+        )
+        add_bots_list = [
+            addr.strip() for addr in add_bots_str.split("\n") if addr.strip()
+        ]
+
+        remove_bots_str = st.text_area(
+            "Always treat as retail (one address per line):",
+            "",
+            help="These users will be classified as retail, overriding other criteria.",
+        )
+        remove_bots_list = [
+            addr.strip() for addr in remove_bots_str.split("\n") if addr.strip()
+        ]
+
     solperp = pd.concat(
         [dedupdf(markets_data[nom], nom, lookahead) for nom in market_selected]
     )
@@ -467,6 +486,18 @@ async def trade_flow_analysis(clearinghouse: DriftClient):
                 true_retail_takers.append(retail_taker)
         retail_takers = true_retail_takers
 
+        for user in add_bots_list:
+            if user not in bot_takers:
+                bot_takers.append(user)
+            if user in retail_takers:
+                retail_takers.remove(user)
+
+        for user in remove_bots_list:
+            if user not in retail_takers:
+                retail_takers.append(user)
+            if user in bot_takers:
+                bot_takers.remove(user)
+
         if showmarkoutfees:
             solperp["markout_pnl_1MIN"] = -(
                 solperp["baseAssetAmountFilled"] * (solperp["takerPremiumNextMinute"])
@@ -524,7 +555,7 @@ async def trade_flow_analysis(clearinghouse: DriftClient):
                     .sort_index()["markout_pnl_1MIN"]
                     .resample("min")
                     .last(),
-                    "botMarkout1MIN": solperp[solperp[user_type].isin(true_bot_takers)]
+                    "botMarkout1MIN": solperp[solperp[user_type].isin(bot_takers)]
                     .set_index("date")
                     .sort_index()["markout_pnl_1MIN"]
                     .resample("min")
@@ -540,10 +571,8 @@ async def trade_flow_analysis(clearinghouse: DriftClient):
         )
         pol2.plotly_chart(fig2)
 
-        show_analysis_tables(
-            "retail " + user_type + "s:", true_retail_takers, user_type
-        )
-        show_analysis_tables("bot " + user_type + "s:", true_bot_takers, user_type)
+        show_analysis_tables("retail " + user_type + "s:", retail_takers, user_type)
+        show_analysis_tables("bot " + user_type + "s:", bot_takers, user_type)
 
     else:
         s1, s2, s3 = st.columns(3)
