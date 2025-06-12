@@ -18,44 +18,76 @@ cohort_colors = {"0": "blue", "1000": "red", "10000": "green", "100000": "orange
 
 def trigger_speed_analysis():
     st.write("# Trigger Speed Analysis")
+
+    query_params = st.query_params
+
+    perp_markets = [m.symbol for m in mainnet_perp_market_configs]
+    order_type_options = ["all", "triggerMarket", "triggerLimit"]
+
+    try:
+        start_date_q = datetime.strptime(
+            query_params.get("start_date"), "%Y-%m-%d"
+        ).date()
+    except (TypeError, ValueError):
+        start_date_q = datetime.now().date() - timedelta(weeks=15)
+
+    try:
+        end_date_q = datetime.strptime(query_params.get("end_date"), "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        end_date_q = datetime.now().date() - timedelta(days=1)
+
+    market_q = query_params.get("market", perp_markets[0])
+    if market_q not in perp_markets:
+        market_q = perp_markets[0]
+
+    order_type_q = query_params.get("order_type", "triggerMarket")
+    if order_type_q not in order_type_options:
+        order_type_q = "triggerMarket"
+
+    use_p99_q = query_params.get("use_p99", "False").lower() == "true"
+
     top_col1, top_col2 = st.columns(2)
     with top_col1:
         start_date = st.date_input(
             "Start Date",
-            value=datetime.now().date() - timedelta(weeks=15),
+            value=start_date_q,
             key="trigger_start_date",
         )
     with top_col2:
         end_date = st.date_input(
             "End Date",
-            value=datetime.now().date() - timedelta(days=1),
+            value=end_date_q,
             key="trigger_end_date",
         )
-
-    perp_markets = [m.symbol for m in mainnet_perp_market_configs]
 
     col1, col2 = st.columns(2)
     with col1:
         selected_market = st.selectbox(
             "Select Market to Analyze:",
             options=perp_markets,
-            index=0,
+            index=perp_markets.index(market_q),
             key="trigger_market_select",
         )
 
     with col2:
         order_type = st.selectbox(
             "Select Order Type:",
-            options=["all", "triggerMarket", "triggerLimit"],
-            index=1,
+            options=order_type_options,
+            index=order_type_options.index(order_type_q),
             key="trigger_order_type_select",
         )
 
     toggle_use_p99 = st.toggle(
         "Use P99 instead of true maximum for box plots",
-        value=False,
+        value=use_p99_q,
         key="trigger_use_p99",
     )
+
+    query_params.start_date = start_date.isoformat()
+    query_params.end_date = end_date.isoformat()
+    query_params.market = selected_market
+    query_params.order_type = order_type
+    query_params.use_p99 = str(toggle_use_p99)
 
     if selected_market and start_date and end_date:
         if start_date > end_date:

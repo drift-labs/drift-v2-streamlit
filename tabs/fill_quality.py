@@ -284,31 +284,70 @@ async def fill_quality_analysis(clearinghouse: DriftClient):
         "Metrics on Fill Quality. Includes auction progress (time into the `auction_duction` before filling), fill price vs oracle price, and metrics on sources of liquidity."
     )
 
-    # Date selection
+    query_params = st.query_params
+
+    perp_markets = [m.symbol for m in mainnet_perp_market_configs]
+    display_mode_options = ["Percentiles", "Count"]
+    liquidity_grouping_options = ["Individual Sources", "JIT vs Non-JIT", "AMM vs DLOB"]
+    liquidity_volume_options = ["Dollars", "Counts"]
+    liquidity_display_options = ["Absolute Values", "Percentage Values"]
+
+    try:
+        start_date_q = dt.strptime(query_params.get("start_date"), "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        start_date_q = dt.now().date() - timedelta(weeks=15)
+
+    try:
+        end_date_q = dt.strptime(query_params.get("end_date"), "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        end_date_q = dt.now().date() - timedelta(days=1)
+
+    market_q = query_params.get("market", perp_markets[0])
+    if market_q not in perp_markets:
+        market_q = perp_markets[0]
+
+    display_mode_q = query_params.get("display_mode", display_mode_options[0])
+    if display_mode_q not in display_mode_options:
+        display_mode_q = display_mode_options[0]
+
+    liquidity_grouping_q = query_params.get(
+        "liquidity_grouping", liquidity_grouping_options[0]
+    )
+    if liquidity_grouping_q not in liquidity_grouping_options:
+        liquidity_grouping_q = liquidity_grouping_options[0]
+
+    liquidity_volume_q = query_params.get(
+        "liquidity_volume", liquidity_volume_options[0]
+    )
+    if liquidity_volume_q not in liquidity_volume_options:
+        liquidity_volume_q = liquidity_volume_options[0]
+
+    liquidity_display_q = query_params.get(
+        "liquidity_display", liquidity_display_options[1]
+    )
+    if liquidity_display_q not in liquidity_display_options:
+        liquidity_display_q = liquidity_display_options[1]
+
     top_col1, top_col2, top_col3 = st.columns(3)
     with top_col1:
-        start_date = st.date_input(
-            "Start Date", value=dt.now().date() - timedelta(weeks=15)
-        )
+        start_date = st.date_input("Start Date", value=start_date_q)
     with top_col2:
-        end_date = st.date_input("End Date", value=dt.now().date() - timedelta(days=1))
+        end_date = st.date_input("End Date", value=end_date_q)
 
     with top_col3:
-        perp_markets = [m.symbol for m in mainnet_perp_market_configs]
         selected_market = st.selectbox(
             "Select Market to Analyze:",
             options=perp_markets,
-            index=0,
+            index=perp_markets.index(market_q),
         )
 
-    # Metric customization settings
     st.write("#### ⚙️ Display Settings")
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         display_mode = st.radio(
             "Fill Quality - Display Units:",
-            options=["Percentiles", "Count"],
-            index=0,
+            options=display_mode_options,
+            index=display_mode_options.index(display_mode_q),
             help="""
             - **Percentiles**: Show P10, P25, P50, P75, P99 distributions
             - **Count**: Show number of fills
@@ -318,8 +357,8 @@ async def fill_quality_analysis(clearinghouse: DriftClient):
     with col2:
         liquidity_grouping_mode = st.radio(
             "Liquidity Sources - Grouping:",
-            options=["Individual Sources", "JIT vs Non-JIT", "AMM vs DLOB"],
-            index=0,
+            options=liquidity_grouping_options,
+            index=liquidity_grouping_options.index(liquidity_grouping_q),
             help="""
             - **Individual Sources**: Show all 4 sources separately (AMM, AMM JIT, Match, Match JIT)
             - **JIT vs Non-JIT**: Group by JIT type (JIT Sources vs Non-JIT Sources)  
@@ -330,8 +369,8 @@ async def fill_quality_analysis(clearinghouse: DriftClient):
     with col3:
         liquidity_volume_units = st.radio(
             "Liquidity Sources - Volume Units:",
-            options=["Dollars", "Counts"],
-            index=0,
+            options=liquidity_volume_options,
+            index=liquidity_volume_options.index(liquidity_volume_q),
             help="""
             - **Dollars**: Display volume in dollar amounts
             - **Counts**: Display volume as number of individual fills
@@ -341,13 +380,21 @@ async def fill_quality_analysis(clearinghouse: DriftClient):
     with col4:
         liquidity_display_mode = st.radio(
             "Liquidity Sources - Display Mode:",
-            options=["Absolute Values", "Percentage Values"],
-            index=1,
+            options=liquidity_display_options,
+            index=liquidity_display_options.index(liquidity_display_q),
             help="""
             - **Absolute Values**: Show raw volume/count values
             - **Percentage Values**: Show percentage breakdown (adds up to 100%)
             """,
         )
+
+    query_params.start_date = start_date.isoformat()
+    query_params.end_date = end_date.isoformat()
+    query_params.market = selected_market
+    query_params.display_mode = display_mode
+    query_params.liquidity_grouping = liquidity_grouping_mode
+    query_params.liquidity_volume = liquidity_volume_units
+    query_params.liquidity_display = liquidity_display_mode
 
     # Convert dates to timestamps
     start_ts = int(dt.combine(start_date, dt.min.time()).timestamp())
