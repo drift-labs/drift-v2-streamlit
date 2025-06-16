@@ -239,7 +239,7 @@ async def trade_flow_analysis(clearinghouse: DriftClient):
     with st.expander("Manual Bot/Retail Configuration"):
         add_bots_str = st.text_area(
             "Always treat as bot (one address per line):",
-            "BRksHqLiq2gvQw1XxsZq6DXZjD3GB5a9J63tUBgd6QS9",
+            "BRksHqLiq2gvQw1XxsZq6DXZjD3GB5a9J63tUBgd6QS9\n2aMcirYcF9W8aTFem6qe8QtvfQ22SLY6KUe6yUQbqfHk",
             help="These users will be classified as bots, overriding other criteria.",
         )
         add_bots_list = [
