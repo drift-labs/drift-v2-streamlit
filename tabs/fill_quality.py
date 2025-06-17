@@ -2045,7 +2045,7 @@ def create_generic_box_plot_with_trends(
                     break
 
         if smoothing_window > 1:
-            title_suffix += f" (Smoothed)"
+            title_suffix += " (Smoothed)"
 
     fig_box.update_layout(
         title=f"Daily Distribution of {title} ({title_prefix}){title_suffix}",
@@ -2096,30 +2096,13 @@ def create_generic_box_plot_with_trends(
             for i, (key, slope) in enumerate(slope_data.items()):
                 col_idx = i % len(cols)
                 with cols[col_idx]:
-                    # Determine color based on slope direction and metric type
-                    delta_color = "normal"
-
-                    # For auction progress, lower is generally better (faster fills)
-                    # For fill vs oracle metrics, smaller differences are generally better
-                    if "auctionProgress" in base_col:
-                        if slope > 0.001:  # More than 0.1% increase per day
-                            delta_color = "inverse"  # Red for worsening (slower)
-                        elif slope < -0.001:  # More than 0.1% decrease per day
-                            delta_color = "normal"  # Green for improving (faster)
-                    else:  # Fill vs oracle metrics
-                        if abs(slope) > 0.1:  # Significant change
-                            delta_color = "inverse" if slope > 0 else "normal"
-
-                    # Create trend text
                     if abs(slope) < 0.001:
                         trend_text = "Stable"
-                        delta_color = "normal"
                     elif slope > 0:
-                        trend_text = "↑ Increasing"
+                        trend_text = "+ Increasing"
                     else:
-                        trend_text = "↓ Decreasing"
+                        trend_text = "- Decreasing"
 
-                    # Format slope based on metric type
                     if "auctionProgress" in base_col:
                         slope_display = f"{slope:.3f}%"
                     elif "Bps" in base_col:
@@ -2131,7 +2114,7 @@ def create_generic_box_plot_with_trends(
                         label=key,
                         value=slope_display,
                         delta=trend_text,
-                        delta_color=delta_color,
+                        delta_color="inverse",
                     )
 
     return fig_box
