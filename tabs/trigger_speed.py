@@ -15,6 +15,30 @@ from utils.dynamodb_client import (
 all_cohorts = ["0", "1000", "10000", "100000"]
 cohort_colors = {"0": "blue", "1000": "red", "10000": "green", "100000": "orange"}
 
+# Better cohort labels for clarity
+cohort_labels = {
+    "0": "Order Size: <$1k",
+    "1000": "Order Size: $1k-$10k",
+    "10000": "Order Size: $10k-$100k",
+    "100000": "Order Size: $100k+",
+}
+cohort_short_labels = {
+    "0": "0-1k",
+    "1000": "1k-10k",
+    "10000": "10k-100k",
+    "100000": "100k+",
+}
+
+# Percentile labels for better context
+percentile_labels = {
+    "P10": "Bottom 90% of orders",
+    "P25": "Bottom 75% of orders",
+    "P50": "Median (50th percentile)",
+    "P75": "Top 25% of orders",
+    "P99": "Top 1% of orders",
+    "Avg": "Average across all orders",
+}
+
 
 def trigger_speed_analysis():
     st.write("# Trigger Speed Analysis")
@@ -171,7 +195,7 @@ def trigger_speed_analysis():
 
         render_summary_stats(processed_cohort_data)
 
-        render_trigger_latency(toggle_use_p99, processed_cohort_data)
+        render_trigger_latency(toggle_use_p99, processed_cohort_data, selected_market)
 
         with st.expander("📊 Legacy Time Series Plots", expanded=False):
             st.write("### Slots to Fill Over Time")
@@ -191,14 +215,14 @@ def trigger_speed_analysis():
                                 x=data_df["datetime"],
                                 y=data_df[p_col],
                                 mode="lines+markers",
-                                name=f"{p_col.replace('slotsToFill', '')} - Cohort {cohort}",
+                                name=f"{p_col.replace('slotsToFill', '')} - {cohort_labels.get(cohort, f'Cohort {cohort}')}",
                                 line=dict(color=cohort_colors.get(cohort, "blue")),
                                 legendgroup=f"cohort_{cohort}",
                             )
                         )
 
             fig_slots.update_layout(
-                title="Slots to Fill (Trigger to Fill/Processed) - All Cohorts",
+                title=f"{selected_market}: Slots to Fill (Trigger to Fill/Processed) - All Cohorts",
                 xaxis_title="Time",
                 yaxis_title="Slots to Fill",
                 legend_title="Percentiles/Avg",
@@ -222,14 +246,14 @@ def trigger_speed_analysis():
                                 x=data_df["datetime"],
                                 y=data_df[p_col],
                                 mode="lines+markers",
-                                name=f"{p_col.replace('fillVsTrigger', '')} - Cohort {cohort}",
+                                name=f"{p_col.replace('fillVsTrigger', '')} - {cohort_labels.get(cohort, f'Cohort {cohort}')}",
                                 line=dict(color=cohort_colors.get(cohort, "red")),
                                 legendgroup=f"cohort_{cohort}",
                             )
                         )
 
             fig_fill_vs_trigger.update_layout(
-                title="Fill vs Trigger Price Difference Over Time (All Cohorts)",
+                title=f"{selected_market}: Fill vs Trigger Price Difference Over Time (All Cohorts)",
                 xaxis_title="Time",
                 yaxis_title="Price Difference (Basis Points)",
                 legend_title="Percentiles/Avg",
@@ -241,7 +265,8 @@ def trigger_speed_analysis():
             # Show raw data for each cohort in separate tabs
             if len(processed_cohort_data) > 1:
                 tab_names = [
-                    f"Cohort {cohort}" for cohort in processed_cohort_data.keys()
+                    cohort_labels.get(cohort, f"Cohort {cohort}")
+                    for cohort in processed_cohort_data.keys()
                 ]
                 tabs = st.tabs(tab_names)
                 for i, (cohort, data_df) in enumerate(processed_cohort_data.items()):
@@ -250,7 +275,8 @@ def trigger_speed_analysis():
             else:
                 # If only one cohort has data, show it directly
                 for cohort, data_df in processed_cohort_data.items():
-                    st.write(f"**Cohort {cohort}**")
+                    cohort_label = cohort_labels.get(cohort, f"Cohort {cohort}")
+                    st.write(f"**{cohort_label}**")
                     st.dataframe(data_df)
 
             if not trigger_limit_liquidity_source_data.empty:
@@ -289,11 +315,8 @@ def render_summary_stats(processed_cohort_data):
                     else float("nan")
                 )
 
-                if i < len(cohort_items) - 1:
-                    next_cohort = f" - {list(cohort_items)[i + 1][0]}"
-                else:
-                    next_cohort = "+"
-                st.write(f"#### Cohort {cohort}{next_cohort}")
+                cohort_label = cohort_labels.get(cohort, f"Cohort {cohort}")
+                st.write(f"#### {cohort_label}")
                 col1, col2, col3, col4 = st.columns(4)
                 col1.metric(
                     "Avg P50 Slots to Fill",
@@ -317,7 +340,7 @@ def render_summary_stats(processed_cohort_data):
                 )
 
 
-def render_trigger_latency(toggle_use_p99, processed_cohort_data):
+def render_trigger_latency(toggle_use_p99, processed_cohort_data, selected_market=None):
     # Add selectbox for choosing which trend lines to display
     st.write("#### Slots from Trigger to Complete Fill (Trigger Latency)")
 
@@ -382,7 +405,7 @@ def render_trigger_latency(toggle_use_p99, processed_cohort_data):
                             else row["slotsToFillMax"]
                         ],
                         mean=[row.get("slotsToFillAvg", row["slotsToFillP50"])],
-                        name=f"Cohort {cohort}",
+                        name=cohort_labels.get(cohort, f"Cohort {cohort}"),
                         legendgroup=f"cohort_{cohort}",
                         showlegend=i
                         == 0,  # Only show legend for first trace of each cohort
@@ -394,10 +417,10 @@ def render_trigger_latency(toggle_use_p99, processed_cohort_data):
 
     # Add trend lines for selected percentiles only
     percentiles_config = {
-        "slotsToFillP25": ("P25", "dash"),
-        "slotsToFillP50": ("P50 (Median)", "solid"),
-        "slotsToFillP99": ("P99", "dot"),
-        "slotsToFillAvg": ("Average", "dashdot"),
+        "slotsToFillP25": (percentile_labels.get("P25", "P25"), "dash"),
+        "slotsToFillP50": (percentile_labels.get("P50", "P50 (Median)"), "solid"),
+        "slotsToFillP99": (percentile_labels.get("P99", "P99"), "dot"),
+        "slotsToFillAvg": (percentile_labels.get("Avg", "Average"), "dashdot"),
     }
 
     for cohort, data_df in processed_cohort_data.items():
@@ -432,7 +455,7 @@ def render_trigger_latency(toggle_use_p99, processed_cohort_data):
                             x=sorted_df["datetime"],
                             y=y_values,
                             mode="lines",
-                            name=f"{percentile_name} Trend - Cohort {cohort}",
+                            name=f"{percentile_name} Trend - {cohort_labels.get(cohort, f'Cohort {cohort}')}",
                             line=dict(
                                 color=cohort_color,
                                 width=3,  # Slightly thicker for smoothed lines
@@ -443,7 +466,7 @@ def render_trigger_latency(toggle_use_p99, processed_cohort_data):
                             legendgroup=f"cohort_{cohort}_trend",
                             showlegend=True,
                             opacity=0.9,  # Slightly more opaque for smoothed lines
-                            hovertemplate=f"<b>{percentile_name} Trend - Cohort {cohort}</b><br>"
+                            hovertemplate=f"<b>{percentile_name} Trend - {cohort_labels.get(cohort, f'Cohort {cohort}')}</b><br>"
                             + "Date: %{x}<br>"
                             + "Smoothed Slots: %{y:.2f}<br>"
                             + f"({'Smoothed' if smoothing_window > 1 else 'Raw'} data)<extra></extra>",
@@ -461,8 +484,13 @@ def render_trigger_latency(toggle_use_p99, processed_cohort_data):
         if smoothing_window > 1:
             title_suffix += f" (Smoothed)"
 
+    # Construct title with market information
+    chart_title = f"Slots from Trigger to Complete Fill (All Cohorts){title_suffix}"
+    if selected_market:
+        chart_title = f"{selected_market}: {chart_title}"
+
     fig_slots_box.update_layout(
-        title=f"Slots from Trigger to Complete Fill (All Cohorts){title_suffix}",
+        title=chart_title,
         xaxis_title="Date",
         yaxis_title="Slots to Fill",
         showlegend=True,
@@ -496,7 +524,7 @@ def render_trigger_latency(toggle_use_p99, processed_cohort_data):
                             slope, _ = np.polyfit(x_days, y_values, 1)
 
                             percentile_name = percentile_col.replace("slotsToFill", "")
-                            key = f"{percentile_name} - Cohort {cohort}"
+                            key = f"{percentile_name} - {cohort_labels.get(cohort, f'Cohort {cohort}')}"
                             slope_data[key] = slope
 
         # Display slopes in columns
@@ -513,7 +541,7 @@ def render_trigger_latency(toggle_use_p99, processed_cohort_data):
                         delta_color = "normal"  # Green for decreasing (good)
 
                     st.metric(
-                        label=key,
+                        label=key.replace("$", "\$"),
                         value=f"{slope:.3f}",
                         delta=f"{'↑' if slope > 0 else '↓'} {'Worsening' if slope > 0 else 'Improving'}",
                         delta_color=delta_color,
@@ -587,7 +615,7 @@ def render_trigger_latency(toggle_use_p99, processed_cohort_data):
                             else row["fillVsTriggerMax"]
                         ],
                         mean=[row.get("fillVsTriggerAvg", row["fillVsTriggerP50"])],
-                        name=f"Cohort {cohort}",
+                        name=cohort_labels.get(cohort, f"Cohort {cohort}"),
                         legendgroup=f"cohort_{cohort}",
                         showlegend=i
                         == 0,  # Only show legend for first trace of each cohort
@@ -599,10 +627,10 @@ def render_trigger_latency(toggle_use_p99, processed_cohort_data):
 
     # Add trend lines for selected percentiles only
     fillvstrigger_percentiles_config = {
-        "fillVsTriggerP25": ("P25", "dash"),
-        "fillVsTriggerP50": ("P50 (Median)", "solid"),
-        "fillVsTriggerP99": ("P99", "dot"),
-        "fillVsTriggerAvg": ("Average", "dashdot"),
+        "fillVsTriggerP25": (percentile_labels.get("P25", "P25"), "dash"),
+        "fillVsTriggerP50": (percentile_labels.get("P50", "P50 (Median)"), "solid"),
+        "fillVsTriggerP99": (percentile_labels.get("P99", "P99"), "dot"),
+        "fillVsTriggerAvg": (percentile_labels.get("Avg", "Average"), "dashdot"),
     }
 
     for cohort, data_df in processed_cohort_data.items():
@@ -644,7 +672,7 @@ def render_trigger_latency(toggle_use_p99, processed_cohort_data):
                             x=sorted_df["datetime"],
                             y=y_values,
                             mode="lines",
-                            name=f"{percentile_name} Trend - Cohort {cohort}",
+                            name=f"{percentile_name} Trend - {cohort_labels.get(cohort, f'Cohort {cohort}')}",
                             line=dict(
                                 color=cohort_color,
                                 width=3,  # Slightly thicker for smoothed lines
@@ -655,7 +683,7 @@ def render_trigger_latency(toggle_use_p99, processed_cohort_data):
                             legendgroup=f"cohort_{cohort}_fillvstrigger_trend",
                             showlegend=True,
                             opacity=0.9,  # Slightly more opaque for smoothed lines
-                            hovertemplate=f"<b>{percentile_name} Trend - Cohort {cohort}</b><br>"
+                            hovertemplate=f"<b>{percentile_name} Trend - {cohort_labels.get(cohort, f'Cohort {cohort}')}</b><br>"
                             + "Date: %{x}<br>"
                             + "Smoothed Basis Points: %{y:.2f}<br>"
                             + f"({'Smoothed' if fillvstrigger_smoothing_window > 1 else 'Raw'} data)<extra></extra>",
@@ -675,8 +703,13 @@ def render_trigger_latency(toggle_use_p99, processed_cohort_data):
         if fillvstrigger_smoothing_window > 1:
             fillvstrigger_title_suffix += f" (Smoothed)"
 
+    # Construct title with market information
+    fillvstrigger_chart_title = f"Daily Distribution of Fill vs Trigger Price Difference (All Cohorts){fillvstrigger_title_suffix}"
+    if selected_market:
+        fillvstrigger_chart_title = f"{selected_market}: {fillvstrigger_chart_title}"
+
     fig_fillvstrigger_box.update_layout(
-        title=f"Daily Distribution of Fill vs Trigger Price Difference (All Cohorts){fillvstrigger_title_suffix}",
+        title=fillvstrigger_chart_title,
         xaxis_title="Date",
         yaxis_title="Price Difference (Basis Points)",
         showlegend=True,
@@ -712,7 +745,7 @@ def render_trigger_latency(toggle_use_p99, processed_cohort_data):
                             percentile_name = percentile_col.replace(
                                 "fillVsTrigger", ""
                             )
-                            key = f"{percentile_name} - Cohort {cohort}"
+                            key = f"{percentile_name} - {cohort_labels.get(cohort, f'Cohort {cohort}')}"
                             fillvstrigger_slope_data[key] = slope
 
         # Display slopes in columns
@@ -737,7 +770,7 @@ def render_trigger_latency(toggle_use_p99, processed_cohort_data):
                         delta_color = "normal"  # Green for decreasing (good)
 
                     st.metric(
-                        label=key,
+                        label=key.replace("$", "\$"),
                         value=f"{slope:.2f} bps",
                         delta=trend_text,
                         delta_color=delta_color,
@@ -763,14 +796,19 @@ def render_trigger_latency(toggle_use_p99, processed_cohort_data):
                         x=data_df["datetime"],
                         y=data_df[c_col],
                         mode="lines+markers",
-                        name=f"{c_col} - Cohort {cohort}",
+                        name=f"{c_col} - {cohort_labels.get(cohort, f'Cohort {cohort}')}",
                         line=dict(color=cohort_colors.get(cohort, "blue")),
                         legendgroup=f"cohort_{cohort}",
                     )
                 )
 
+    # Construct title with market information
+    counts_chart_title = "Trigger Order Counts (All Cohorts)"
+    if selected_market:
+        counts_chart_title = f"{selected_market}: {counts_chart_title}"
+
     fig_counts.update_layout(
-        title="Trigger Order Counts (All Cohorts)",
+        title=counts_chart_title,
         xaxis_title="Time",
         yaxis_title="Count",
         legend_title="Order Types/Stats",
@@ -927,8 +965,14 @@ def render_liquidity_source_analysis(start_ts, end_ts, selected_market, order_ty
             )
         )
 
+        # Construct title with market information
+        chart_title = (
+            f"{title_prefix} Orders: Liquidity Sources Breakdown with Total Volume"
+        )
+        chart_title = f"{selected_market}: {chart_title}"
+
         fig_amm_match.update_layout(
-            title=f"{title_prefix} Orders: Liquidity Sources Breakdown with Total Volume",
+            title=chart_title,
             xaxis_title="Date",
             yaxis_title="Volume ($)",
             yaxis=dict(tickformat="$,.0f"),

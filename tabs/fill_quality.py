@@ -25,7 +25,18 @@ cohort_colors = {
 }
 cohort_order = ["0-1k", "1k-10k", "10k-100k", "100k+"]
 cohorts = ["0", "1000", "10000", "100000"]
-cohort_labels = {"0": "0-1k", "1000": "1k-10k", "10000": "10k-100k", "100000": "100k+"}
+cohort_labels = {
+    "0": "Order Size: <$1k",
+    "1000": "Order Size: $1k-$10k",
+    "10000": "Order Size: $10k-$100k",
+    "100000": "Order Size: $100k+",
+}
+cohort_short_labels = {
+    "0": "0-1k",
+    "1000": "1k-10k",
+    "10000": "10k-100k",
+    "100000": "100k+",
+}
 
 order_type_colors = {
     "market": "#636EFA",
@@ -65,6 +76,16 @@ liquidity_source_colors = {
 swift_type_colors = {
     "0": "#1f77b4",  # Non-Swift (Blue)
     "1": "#AB63FA",  # Swift (Purple)
+}
+
+# Percentile labels for better context
+percentile_labels = {
+    "P10": "Bottom 90% of orders",
+    "P25": "Bottom 75% of orders",
+    "P50": "Median (50th percentile)",
+    "P75": "Top 25% of orders",
+    "P99": "Top 1% of orders",
+    "Avg": "Average across all orders",
 }
 
 
@@ -564,7 +585,7 @@ def render_fill_quality_overview(
 
         # Create time series chart
         fig = create_fill_quality_timeseries(
-            df_processed, metric_config, display_mode, "Overall"
+            df_processed, metric_config, display_mode, "Overall", selected_market
         )
         st.plotly_chart(fig, use_container_width=True)
 
@@ -739,6 +760,7 @@ def render_fill_quality_by_cohort(
                 toggle_use_p99,
                 selected_percentiles,
                 smoothing_window,
+                selected_market,
             )
             if fig_box:
                 st.plotly_chart(fig_box, use_container_width=True)
@@ -746,7 +768,7 @@ def render_fill_quality_by_cohort(
         elif display_mode == "Count":
             st.write(f"### {metric_config['title']} - Combined Cohort Count Analysis")
             fig_combined = create_cohort_count_comparison_chart(
-                selected_cohort_data, metric_config
+                selected_cohort_data, metric_config, selected_market
             )
             st.plotly_chart(fig_combined, use_container_width=True)
 
@@ -910,18 +932,22 @@ def render_fill_quality_by_cohort(
                                 x=df_liquidity["datetime"],
                                 y=df_liquidity["total_volume"],
                                 mode="lines+markers",
-                                name=f"Cohort {cohort_label}",
+                                name=f"{cohort_label}",
                                 line=dict(
                                     color=cohort_colors_by_lb.get(cohort, "#636EFA"),
                                     width=2,
                                 ),
                                 marker=dict(size=4),
-                                hovertemplate=f"<b>Cohort {cohort_label}</b><br>Date: %{{x}}<br>Volume: {hover_total_format}<extra></extra>",
+                                hovertemplate=f"<b>{cohort_label}</b><br>Date: %{{x}}<br>Volume: {hover_total_format}<extra></extra>",
                             )
                         )
 
+        # Construct title with market information
+        chart_title = f"Liquidity Source Volume Comparison Across Cohorts ({liquidity_volume_units} - {display_mode_text})"
+        chart_title = f"{selected_market}: {chart_title}"
+
         fig_comparison.update_layout(
-            title=f"Liquidity Source Volume Comparison Across Cohorts ({liquidity_volume_units} - {display_mode_text})",
+            title=chart_title,
             xaxis_title="Date",
             yaxis_title=y_axis_title,
             yaxis=dict(tickformat=axis_format),
@@ -1101,6 +1127,7 @@ def render_fill_quality_by_order_type(
                 toggle_use_p99,
                 selected_percentiles,
                 smoothing_window,
+                selected_market,
             )
             if fig_box:
                 st.plotly_chart(fig_box, use_container_width=True)
@@ -1108,7 +1135,7 @@ def render_fill_quality_by_order_type(
         elif display_mode == "Count":
             st.write(f"### {metric_config['title']} - Order Type Count Comparison")
             fig_comparison = create_order_type_comparison_chart(
-                order_type_data, metric_config, display_mode
+                order_type_data, metric_config, display_mode, selected_market
             )
             st.plotly_chart(fig_comparison, use_container_width=True)
 
@@ -1284,6 +1311,7 @@ def render_fill_quality_by_direction(
                 toggle_use_p99,
                 selected_percentiles,
                 smoothing_window,
+                selected_market,
             )
             if fig_box:
                 st.plotly_chart(fig_box, use_container_width=True)
@@ -1291,7 +1319,7 @@ def render_fill_quality_by_direction(
         elif display_mode == "Count":
             st.write(f"### {metric_config['title']} - Direction Count Comparison")
             fig_comparison = create_direction_comparison_chart(
-                direction_data, metric_config, display_mode
+                direction_data, metric_config, display_mode, selected_market
             )
             st.plotly_chart(fig_comparison, use_container_width=True)
 
@@ -1427,6 +1455,7 @@ def render_fill_quality_by_swift(
                 toggle_use_p99,
                 selected_percentiles,
                 smoothing_window,
+                selected_market,
             )
             if fig_box:
                 st.plotly_chart(fig_box, use_container_width=True)
@@ -1435,7 +1464,7 @@ def render_fill_quality_by_swift(
             # Create comparison chart for other display modes
             st.write(f"### {metric_config['title']} - Swift Comparison")
             fig_comparison = create_swift_comparison_chart(
-                swift_data, metric_config, display_mode
+                swift_data, metric_config, display_mode, selected_market
             )
             st.plotly_chart(fig_comparison, use_container_width=True)
 
@@ -1575,7 +1604,9 @@ def display_summary_metrics(df, metric_config):
         st.metric("Avg P99", format_str.format(p99_value))
 
 
-def create_fill_quality_timeseries(df, metric_config, display_mode, title_prefix):
+def create_fill_quality_timeseries(
+    df, metric_config, display_mode, title_prefix, market_name=None
+):
     """Create time series chart for fill quality"""
     fig = go.Figure()
 
@@ -1590,15 +1621,16 @@ def create_fill_quality_timeseries(df, metric_config, display_mode, title_prefix
         for i, percentile in enumerate(percentiles):
             col_name = f"{base_col}{percentile}"
             if col_name in df.columns:
+                percentile_label = percentile_labels.get(percentile, percentile)
                 fig.add_trace(
                     go.Scatter(
                         x=df["datetime"],
                         y=df[col_name],
                         mode="lines+markers",
-                        name=f"{percentile}",
+                        name=f"{percentile_label}",
                         line=dict(color=colors[i], width=2),
                         marker=dict(size=4),
-                        hovertemplate=f"<b>{percentile}</b><br>Date: %{{x}}<br>Value: %{{y{hover_format}}}<extra></extra>",
+                        hovertemplate=f"<b>{percentile_label}</b><br>Date: %{{x}}<br>Value: %{{y{hover_format}}}<extra></extra>",
                     )
                 )
 
@@ -1607,9 +1639,9 @@ def create_fill_quality_timeseries(df, metric_config, display_mode, title_prefix
                 x=df["datetime"],
                 y=df[f"{base_col}Avg"],
                 mode="lines",
-                name="Average",
+                name=percentile_labels.get("Avg", "Average"),
                 line=dict(color="#636EFA", width=2, dash="dash"),
-                hovertemplate=f"<b>Average</b><br>Date: %{{x}}<br>Value: %{{y{hover_format}}}<extra></extra>",
+                hovertemplate=f"<b>{percentile_labels.get('Avg', 'Average')}</b><br>Date: %{{x}}<br>Value: %{{y{hover_format}}}<extra></extra>",
             )
         )
 
@@ -1629,8 +1661,15 @@ def create_fill_quality_timeseries(df, metric_config, display_mode, title_prefix
             )
             y_axis_title = "Number of Fills"
 
+    # Construct title with market information
+    chart_title = f"{metric_config['title']} ({display_mode})"
+    if market_name:
+        chart_title = f"{market_name}: {chart_title}"
+    if title_prefix and title_prefix != "Overall":
+        chart_title = f"{title_prefix} - {chart_title}"
+
     fig.update_layout(
-        title=f"{title_prefix}: {metric_config['title']} ({display_mode})",
+        title=chart_title,
         xaxis_title="Date",
         yaxis_title=y_axis_title,
         hovermode="x unified",
@@ -1667,7 +1706,9 @@ def create_fill_quality_distribution(df, metric_config, title_prefix):
     return fig
 
 
-def create_order_type_comparison_chart(order_type_data, metric_config, display_mode):
+def create_order_type_comparison_chart(
+    order_type_data, metric_config, display_mode, market_name=None
+):
     """Create comparison chart across order types"""
     fig = go.Figure()
 
@@ -1689,7 +1730,7 @@ def create_order_type_comparison_chart(order_type_data, metric_config, display_m
                             color=order_type_colors.get(order_type, "#636EFA"), width=2
                         ),
                         marker=dict(size=4),
-                        hovertemplate=f"<b>{order_type.title()}</b><br>Date: %{{x}}<br>P50: %{{y{hover_format}}}<extra></extra>",
+                        hovertemplate=f"<b>{order_type.title()}</b><br>Date: %{{x}}<br>{percentile_labels.get('P50', 'P50')}: %{{y{hover_format}}}<extra></extra>",
                     )
                 )
 
@@ -1712,8 +1753,13 @@ def create_order_type_comparison_chart(order_type_data, metric_config, display_m
                 )
         y_axis_title = "Number of Fills"
 
+    # Construct title with market information
+    chart_title = f"Order Type Comparison: {metric_config['title']} ({display_mode})"
+    if market_name:
+        chart_title = f"{market_name}: {chart_title}"
+
     fig.update_layout(
-        title=f"Order Type Comparison: {metric_config['title']} ({display_mode})",
+        title=chart_title,
         xaxis_title="Date",
         yaxis_title=y_axis_title,
         hovermode="x unified",
@@ -1723,7 +1769,9 @@ def create_order_type_comparison_chart(order_type_data, metric_config, display_m
     return fig
 
 
-def create_direction_comparison_chart(direction_data, metric_config, display_mode):
+def create_direction_comparison_chart(
+    direction_data, metric_config, display_mode, market_name=None
+):
     """Create comparison chart across order directions"""
     fig = go.Figure()
 
@@ -1745,7 +1793,7 @@ def create_direction_comparison_chart(direction_data, metric_config, display_mod
                             color=direction_colors.get(direction, "#636EFA"), width=2
                         ),
                         marker=dict(size=4),
-                        hovertemplate=f"<b>{direction.title()}</b><br>Date: %{{x}}<br>P50: %{{y{hover_format}}}<extra></extra>",
+                        hovertemplate=f"<b>{direction.title()}</b><br>Date: %{{x}}<br>{percentile_labels.get('P50', 'P50')}: %{{y{hover_format}}}<extra></extra>",
                     )
                 )
 
@@ -1786,8 +1834,13 @@ def create_direction_comparison_chart(direction_data, metric_config, display_mod
                 )
         y_axis_title = "Number of Fills"
 
+    # Construct title with market information
+    chart_title = f"Direction Comparison: {metric_config['title']} ({display_mode})"
+    if market_name:
+        chart_title = f"{market_name}: {chart_title}"
+
     fig.update_layout(
-        title=f"Direction Comparison: {metric_config['title']} ({display_mode})",
+        title=chart_title,
         xaxis_title="Date",
         yaxis_title=y_axis_title,
         hovermode="x unified",
@@ -1797,7 +1850,9 @@ def create_direction_comparison_chart(direction_data, metric_config, display_mod
     return fig
 
 
-def create_swift_comparison_chart(swift_data, metric_config, display_mode):
+def create_swift_comparison_chart(
+    swift_data, metric_config, display_mode, market_name=None
+):
     """Create comparison chart across swift flags"""
     fig = go.Figure()
 
@@ -1821,7 +1876,7 @@ def create_swift_comparison_chart(swift_data, metric_config, display_mode):
                             color=bit_flag_colors.get(swift_type, "#636EFA"), width=2
                         ),
                         marker=dict(size=4),
-                        hovertemplate=f"<b>{swift_label}</b><br>Date: %{{x}}<br>P50: %{{y{hover_format}}}<extra></extra>",
+                        hovertemplate=f"<b>{swift_label}</b><br>Date: %{{x}}<br>{percentile_labels.get('P50', 'P50')}: %{{y{hover_format}}}<extra></extra>",
                     )
                 )
 
@@ -1864,8 +1919,13 @@ def create_swift_comparison_chart(swift_data, metric_config, display_mode):
                 )
         y_axis_title = "Number of Fills"
 
+    # Construct title with market information
+    chart_title = f"Swift Comparison: {metric_config['title']} ({display_mode})"
+    if market_name:
+        chart_title = f"{market_name}: {chart_title}"
+
     fig.update_layout(
-        title=f"Swift Comparison: {metric_config['title']} ({display_mode})",
+        title=chart_title,
         xaxis_title="Date",
         yaxis_title=y_axis_title,
         hovermode="x unified",
@@ -1886,6 +1946,7 @@ def create_generic_box_plot_with_trends(
     widget_key_prefix,
     selected_percentiles=[],
     smoothing_window=1,
+    market_name=None,
 ):
     """Create box plots with trend lines for any data grouping (cohorts, order types, etc.)"""
 
@@ -1963,10 +2024,10 @@ def create_generic_box_plot_with_trends(
 
     # Add trend lines for selected percentiles only
     percentiles_config = {
-        f"{base_col}P25": ("P25", "dash"),
-        f"{base_col}P50": ("P50 (Median)", "solid"),
-        f"{base_col}P99": ("P99", "dot"),
-        f"{base_col}Avg": ("Average", "dashdot"),
+        f"{base_col}P25": (percentile_labels.get("P25", "P25"), "dash"),
+        f"{base_col}P50": (percentile_labels.get("P50", "P50 (Median)"), "solid"),
+        f"{base_col}P99": (percentile_labels.get("P99", "P99"), "dot"),
+        f"{base_col}Avg": (percentile_labels.get("Avg", "Average"), "dashdot"),
     }
 
     for data_key, data_df in data_dict.items():
@@ -2047,8 +2108,16 @@ def create_generic_box_plot_with_trends(
         if smoothing_window > 1:
             title_suffix += " (Smoothed)"
 
+    # Construct title with market information
+    chart_title = f"Daily Distribution of {title}"
+    if market_name:
+        chart_title = f"{market_name}: {chart_title}"
+    if title_prefix:
+        chart_title = f"{chart_title} ({title_prefix})"
+    chart_title = f"{chart_title}{title_suffix}"
+
     fig_box.update_layout(
-        title=f"Daily Distribution of {title} ({title_prefix}){title_suffix}",
+        title=chart_title,
         xaxis_title="Date",
         yaxis_title=y_axis_title,
         showlegend=True,
@@ -2127,13 +2196,14 @@ def create_fill_quality_box_plot(
     toggle_use_p99=False,
     selected_percentiles=[],
     smoothing_window=1,
+    market_name=None,
 ):
     """Create box plots for fill quality across cohorts"""
     # Create proper color mapping from cohort keys to colors
     cohort_color_mapping = {}
     for cohort in cohorts:
-        if cohort in cohort_labels:
-            cohort_color_mapping[cohort] = cohort_colors[cohort_labels[cohort]]
+        if cohort in cohort_short_labels:
+            cohort_color_mapping[cohort] = cohort_colors[cohort_short_labels[cohort]]
 
     return create_generic_box_plot_with_trends(
         data_dict=cohort_data,
@@ -2141,11 +2211,12 @@ def create_fill_quality_box_plot(
         display_mode=display_mode,
         toggle_use_p99=toggle_use_p99,
         color_mapping=cohort_color_mapping,
-        label_mapping={cohort: f"Cohort {cohort_labels[cohort]}" for cohort in cohorts},
+        label_mapping={cohort: cohort_labels[cohort] for cohort in cohorts},
         title_prefix="All Cohorts",
         widget_key_prefix="cohort",
         selected_percentiles=selected_percentiles,
         smoothing_window=smoothing_window,
+        market_name=market_name,
     )
 
 
@@ -2156,6 +2227,7 @@ def create_order_type_box_plot(
     toggle_use_p99=False,
     selected_percentiles=[],
     smoothing_window=1,
+    market_name=None,
 ):
     """Create box plots for fill quality across order types"""
     return create_generic_box_plot_with_trends(
@@ -2169,6 +2241,7 @@ def create_order_type_box_plot(
         widget_key_prefix="order_type",
         selected_percentiles=selected_percentiles,
         smoothing_window=smoothing_window,
+        market_name=market_name,
     )
 
 
@@ -2179,6 +2252,7 @@ def create_direction_box_plot(
     toggle_use_p99=False,
     selected_percentiles=[],
     smoothing_window=1,
+    market_name=None,
 ):
     """Create box plots for fill quality across order directions"""
     return create_generic_box_plot_with_trends(
@@ -2192,6 +2266,7 @@ def create_direction_box_plot(
         widget_key_prefix="direction",
         selected_percentiles=selected_percentiles,
         smoothing_window=smoothing_window,
+        market_name=market_name,
     )
 
 
@@ -2202,6 +2277,7 @@ def create_swift_box_plot(
     toggle_use_p99=False,
     selected_percentiles=[],
     smoothing_window=1,
+    market_name=None,
 ):
     """Create box plots for fill quality across swift flags"""
     swift_labels = {"0": "Non-Swift", "1": "Swift"}
@@ -2216,10 +2292,11 @@ def create_swift_box_plot(
         widget_key_prefix="swift",
         selected_percentiles=selected_percentiles,
         smoothing_window=smoothing_window,
+        market_name=market_name,
     )
 
 
-def create_cohort_count_comparison_chart(cohort_data, metric_config):
+def create_cohort_count_comparison_chart(cohort_data, metric_config, market_name=None):
     """Create combined count comparison chart across cohorts"""
     fig = go.Figure()
 
@@ -2229,22 +2306,28 @@ def create_cohort_count_comparison_chart(cohort_data, metric_config):
     for cohort, df in cohort_data.items():
         if col_name in df.columns:
             cohort_label = cohort_labels[cohort]
-            cohort_color = cohort_colors[cohort_label]
+            cohort_short = cohort_short_labels[cohort]
+            cohort_color = cohort_colors[cohort_short]
 
             fig.add_trace(
                 go.Scatter(
                     x=df["datetime"],
                     y=df[col_name],
                     mode="lines+markers",
-                    name=f"Cohort {cohort_label}",
+                    name=cohort_label,
                     line=dict(color=cohort_color, width=2),
                     marker=dict(size=4),
-                    hovertemplate=f"<b>Cohort {cohort_label}</b><br>Date: %{{x}}<br>Count: %{{y:,.0f}}<extra></extra>",
+                    hovertemplate=f"<b>{cohort_label}</b><br>Date: %{{x}}<br>Count: %{{y:,.0f}}<extra></extra>",
                 )
             )
 
+    # Construct title with market information
+    chart_title = f"Cohort Comparison: {metric_config['title']} (Count)"
+    if market_name:
+        chart_title = f"{market_name}: {chart_title}"
+
     fig.update_layout(
-        title=f"Cohort Comparison: {metric_config['title']} (Count)",
+        title=chart_title,
         xaxis_title="Date",
         yaxis_title="Number of Fills",
         hovermode="x unified",
@@ -2355,11 +2438,23 @@ def create_liquidity_source_chart(
             )
         )
 
-    # Update title to reflect display mode
+    # Update title to reflect display mode and include market information
     display_mode_text = "Percentage" if use_percentages else "Absolute"
     title = f"Liquidity Sources Breakdown ({grouping_mode} - {volume_units} - {display_mode_text})"
-    if title_prefix:
-        title = f"{title_prefix}: {title}"
+
+    # Extract market name from title_prefix if it contains ":"
+    market_name = None
+    clean_title_prefix = title_prefix
+    if title_prefix and ":" in title_prefix:
+        parts = title_prefix.split(":", 1)
+        if len(parts) == 2:
+            market_name = parts[0].strip()
+            clean_title_prefix = parts[1].strip()
+
+    if market_name:
+        title = f"{market_name}: {title}"
+    if clean_title_prefix:
+        title = f"{clean_title_prefix} - {title}"
 
     fig.update_layout(
         title=title,
