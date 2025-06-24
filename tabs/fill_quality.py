@@ -80,12 +80,12 @@ swift_type_colors = {
 
 # Percentile labels for better context
 percentile_labels = {
-    "P10": "Bottom 90% of orders",
-    "P25": "Bottom 75% of orders",
-    "P50": "Median (50th percentile)",
-    "P75": "Top 25% of orders",
-    "P99": "Top 1% of orders",
-    "Avg": "Average across all orders",
+    "P10": "Top 10%",
+    "P25": "Top 25%",
+    "P50": "Median",
+    "P75": "Worst 25%",
+    "P99": "Worst 1%",
+    "Avg": "Average",
 }
 
 
