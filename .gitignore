@@ -9,3 +9,8 @@ __pycache__
 .env
 transactions/
 run.sh
+
+pipelines/*/history
+pipelines/*/storage
+pipelines/*/schedules
+!pipelines/pipelines/schedules

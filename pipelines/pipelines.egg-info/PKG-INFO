@@ -1,0 +1,11 @@
+Metadata-Version: 2.4
+Name: pipelines
+Version: 0.0.0
+Requires-Dist: dagster
+Requires-Dist: dagster-cloud
+Requires-Dist: dagster-aws
+Provides-Extra: dev
+Requires-Dist: dagster-webserver; extra == "dev"
+Requires-Dist: pytest; extra == "dev"
+Dynamic: provides-extra
+Dynamic: requires-dist
