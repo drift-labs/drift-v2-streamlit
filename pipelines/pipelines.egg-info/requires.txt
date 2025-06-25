@@ -1,0 +1,7 @@
+dagster
+dagster-cloud
+dagster-aws
+
+[dev]
+dagster-webserver
+pytest

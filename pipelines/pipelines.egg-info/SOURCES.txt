@@ -1,0 +1,11 @@
+README.md
+pyproject.toml
+setup.cfg
+setup.py
+pipelines/__init__.py
+pipelines/assets.py
+pipelines.egg-info/PKG-INFO
+pipelines.egg-info/SOURCES.txt
+pipelines.egg-info/dependency_links.txt
+pipelines.egg-info/requires.txt
+pipelines.egg-info/top_level.txt
