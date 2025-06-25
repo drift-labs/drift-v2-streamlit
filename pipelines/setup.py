@@ -6,7 +6,10 @@ setup(
     install_requires=[
         "dagster",
         "dagster-cloud",
-        "dagster-aws"
+        "dagster-aws",
+        "boto3",
+        "pandas",
+        "s3fs",
     ],
     extras_require={"dev": ["dagster-webserver", "pytest"]},
 )

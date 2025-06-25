@@ -1,6 +1,9 @@
 dagster
 dagster-cloud
 dagster-aws
+boto3
+pandas
+s3fs
 
 [dev]
 dagster-webserver
