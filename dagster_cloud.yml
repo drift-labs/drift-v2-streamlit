@@ -1,0 +1,4 @@
+locations:
+  - location_name: pipelines
+    code_directory: ./pipelines
+    package_name: pipelines
