@@ -6,20 +6,32 @@ import boto3
 import csv
 from urllib.parse import urlparse
 
+
 class AthenaConfig(ConfigurableResource):
     database_name: str
     trades_table_name: str = "eventtype_traderecord"
+    orders_table_name: str = "eventtype_orderrecord"
+    actions_table_name: str = "eventtype_orderactionrecord"
+
 
 class WrappedAthenaClient(AthenaClient):
     def _results(self, execution_id):
-        execution = self.client.get_query_execution(QueryExecutionId=execution_id)["QueryExecution"]
+        execution = self.client.get_query_execution(QueryExecutionId=execution_id)[
+            "QueryExecution"
+        ]
         s3 = boto3.resource("s3")
         output_location = execution["ResultConfiguration"]["OutputLocation"]
         bucket = urlparse(output_location).netloc
         prefix = urlparse(output_location).path.lstrip("/")
 
-        results = []
-        rows = s3.Bucket(bucket).Object(prefix).get()["Body"].read().decode("utf-8").splitlines()
+        rows = (
+            s3.Bucket(bucket)
+            .Object(prefix)
+            .get()["Body"]
+            .read()
+            .decode("utf-8")
+            .splitlines()
+        )
         reader = csv.reader(rows)
         rows = list(reader)
 
@@ -30,6 +42,7 @@ class WrappedAthenaClient(AthenaClient):
         data_rows = rows[1:]
 
         return pd.DataFrame(data_rows, columns=header)
+
 
 class WrappedAthenaClientResource(AthenaClientResource):
     def get_client(self) -> WrappedAthenaClient:
