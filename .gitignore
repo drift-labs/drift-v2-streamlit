@@ -14,3 +14,4 @@ pipelines/*/history
 pipelines/*/storage
 pipelines/*/schedules
 !pipelines/pipelines/schedules
+local_data/
