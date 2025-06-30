@@ -17,6 +17,7 @@ from tabs.api import show_api
 from tabs.competition import competitions
 from tabs.counterparty_analysis import counterparty_analysis_page
 from tabs.dlp import dlp
+from tabs.drift_buyback import drift_buyback_dashboard
 from tabs.fee_income import fee_income_page
 from tabs.fees import fee_page
 from tabs.fill_quality import fill_quality_analysis
@@ -92,6 +93,7 @@ def main():
 
     tab_options = (
         "Welcome",
+        "DRIFT Buyback",
         "Overview-Markets",
         "Overview-Users",
         "Simulations",
@@ -219,6 +221,10 @@ def main():
         (this app uses streamlit==1.27, see `requirements.txt`)
         """
         )
+
+    elif tab.lower() == "drift buyback":
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(drift_buyback_dashboard(clearing_house))
 
     elif tab.lower() == "overview-markets":
         loop = asyncio.new_event_loop()
