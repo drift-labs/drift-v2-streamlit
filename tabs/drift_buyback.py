@@ -31,7 +31,6 @@ async def drift_buyback_dashboard(ch: DriftClient):
         "**Real-time tracking of DRIFT buyback via insurance fund rebalancing**"
     )
 
-    # Configuration controls
     with st.expander("⚙️ Configuration", expanded=False):
         col1, col2, col3 = st.columns(3)
 
@@ -58,11 +57,10 @@ async def drift_buyback_dashboard(ch: DriftClient):
     with summary_tab:
         metrics_col1, metrics_col2, metrics_col3, metrics_col4 = st.columns(4)
 
-        # Create placeholder for progress bar
         progress_bar = st.progress(0, text="Initializing...")
 
         try:
-            progress_bar.progress(10, text="Finding DRIFT market configuration...")
+            progress_bar.progress(1, text="Finding DRIFT market configuration...")
             drift_market_index = get_drift_market_index()
 
             total_usdc_allocated = 0
@@ -71,7 +69,7 @@ async def drift_buyback_dashboard(ch: DriftClient):
                 progress_bar.empty()
                 return
             else:
-                progress_bar.progress(20, text="Fetching rebalance configuration...")
+                progress_bar.progress(2, text="Fetching rebalance configuration...")
                 rebalance_config_pk = get_if_rebalance_config_public_key(
                     ch.program_id, 0, drift_market_index
                 )
@@ -89,7 +87,7 @@ async def drift_buyback_dashboard(ch: DriftClient):
                     )
                     total_usdc_allocated = 1000000
 
-            progress_bar.progress(30, text="Fetching transaction history...")
+            progress_bar.progress(3, text="Fetching transaction history...")
             swap_events, debug_info = await fetch_insurance_fund_swap_events(
                 ch,
                 max_transactions,
@@ -186,10 +184,8 @@ async def drift_buyback_dashboard(ch: DriftClient):
 
         try:
             if "swap_events" in locals() and swap_events:
-                # Create DataFrame for transactions table
                 df = create_transactions_dataframe(swap_events)
 
-                # Filters
                 col1, col2 = st.columns(2)
                 with col1:
                     date_filter = st.date_input(
@@ -201,12 +197,10 @@ async def drift_buyback_dashboard(ch: DriftClient):
                         "Min USDC amount", min_value=0.0, value=0.0
                     )
 
-                # Apply filters
                 filtered_df = df[
                     (df["date"] >= date_filter) & (df["usdc_amount"] >= min_amount)
                 ]
 
-                # Display table
                 st.dataframe(
                     filtered_df,
                     use_container_width=True,
@@ -221,11 +215,15 @@ async def drift_buyback_dashboard(ch: DriftClient):
                         "price": st.column_config.NumberColumn(
                             "DRIFT Price", format="$%.4f"
                         ),
-                        "tx_sig": st.column_config.TextColumn("Transaction"),
+                        "tx_sig": st.column_config.TextColumn(
+                            "Transaction", width="small"
+                        ),
+                        "solscan_link": st.column_config.LinkColumn(
+                            "View on Solscan", display_text="View", width="small"
+                        ),
                     },
                 )
 
-                # Download option
                 csv = filtered_df.to_csv(index=False)
                 st.download_button(
                     label="📥 Download as CSV",
@@ -244,7 +242,6 @@ async def drift_buyback_dashboard(ch: DriftClient):
 
         try:
             if "swap_events" in locals() and swap_events:
-                # Price trend chart
                 df = create_transactions_dataframe(swap_events)
 
                 fig_price = px.line(
@@ -257,7 +254,6 @@ async def drift_buyback_dashboard(ch: DriftClient):
                 fig_price.update_layout(showlegend=False)
                 st.plotly_chart(fig_price, use_container_width=True)
 
-                # Volume chart
                 fig_volume = px.bar(
                     df.groupby(df["timestamp"].dt.date)["usdc_amount"]
                     .sum()
@@ -269,7 +265,6 @@ async def drift_buyback_dashboard(ch: DriftClient):
                 )
                 st.plotly_chart(fig_volume, use_container_width=True)
 
-                # Cumulative purchases
                 df_sorted = df.sort_values("timestamp")
                 df_sorted["cumulative_drift"] = df_sorted["drift_amount"].cumsum()
                 df_sorted["cumulative_usdc"] = df_sorted["usdc_amount"].cumsum()
@@ -319,7 +314,6 @@ async def drift_buyback_dashboard(ch: DriftClient):
             st.subheader("Raw Swap Events")
             st.json(swap_events)
 
-    # Auto-refresh logic
     if auto_refresh:
         await asyncio.sleep(30)
         st.rerun()
@@ -344,9 +338,8 @@ async def fetch_insurance_fund_swap_events(
     }
 
     try:
-        # Get recent transactions for the program
         if progress_bar:
-            progress_bar.progress(40, text="Fetching transaction signatures...")
+            progress_bar.progress(4, text="Fetching transaction signatures...")
 
         transactions = await transaction_history_for_account(
             ch.program.provider.connection,
@@ -364,23 +357,20 @@ async def fetch_insurance_fund_swap_events(
 
         if progress_bar:
             progress_bar.progress(
-                50, text=f"Processing {len(transactions)} transactions..."
+                5, text=f"Processing {len(transactions)} transactions..."
             )
 
-        # Parse events from transactions
         parser = EventParser(ch.program.program_id, ch.program.coder)
         swap_events = []
 
         for i, tx in enumerate(transactions):
-            # Update progress bar periodically
             if progress_bar and i % max(1, len(transactions) // 10) == 0:
-                progress = 50 + int((i / len(transactions)) * 40)
+                progress = 5 + int((i / len(transactions)) * 40)
                 progress_bar.progress(
                     progress,
                     text=f"Processing transaction {i + 1}/{len(transactions)}...",
                 )
             try:
-                # Get full transaction details
                 tx_sig = tx["signature"]
                 full_tx = await ch.program.provider.connection.get_transaction(
                     Signature.from_string(tx_sig), max_supported_transaction_version=0
@@ -390,7 +380,6 @@ async def fetch_insurance_fund_swap_events(
                     debug_info["failed_parses"] += 1
                     continue
 
-                # Parse logs for events
                 logs = []
 
                 def event_callback(event):
@@ -408,7 +397,6 @@ async def fetch_insurance_fund_swap_events(
                     parser.parse_logs(log_messages, event_callback)
                     debug_info["successful_parses"] += 1
 
-                    # Filter for InsuranceFundSwapRecord events
                     for event in logs:
                         if event.name == "InsuranceFundSwapRecord":
                             swap_data = parse_swap_event(
@@ -417,12 +405,10 @@ async def fetch_insurance_fund_swap_events(
                             if swap_data:
                                 swap_events.append(swap_data)
                                 debug_info["swap_events_found"] += 1
-                        # Also look for related events that might indicate swaps
                         elif event.name in [
                             "TransferProtocolIfSharesToRevenuePoolRecord",
                             "InsuranceFundRecord",
                         ]:
-                            # Could indicate related activity
                             pass
                 else:
                     debug_info["failed_parses"] += 1
@@ -447,14 +433,8 @@ async def fetch_insurance_fund_swap_events(
 def parse_swap_event(event_data, tx_info, drift_market_index: int):
     """Parse InsuranceFundSwapRecord event data into our tracking format"""
     try:
-        # Extract relevant fields from the event
-        # Based on the GitHub commit, these should be the actual field names
         timestamp = tx_info.get("blockTime", 0)
-
-        # Try different possible field names based on the commit structure
         event_dict = event_data.__dict__ if hasattr(event_data, "__dict__") else {}
-
-        # Common fields that might exist in the swap record
         possible_fields = [
             "inMarketIndex",
             "in_market_index",
@@ -472,7 +452,6 @@ def parse_swap_event(event_data, tx_info, drift_market_index: int):
             "timestamp",
         ]
 
-        # Extract what we can from the event
         in_market = None
         out_market = None
         in_amount = None
@@ -490,7 +469,6 @@ def parse_swap_event(event_data, tx_info, drift_market_index: int):
                 elif "out" in field.lower() and "amount" in field.lower():
                     out_amount = value
 
-        # If we couldn't find the exact fields, try generic ones
         if in_market is None:
             in_market = getattr(event_data, "marketIndex", 0)
         if out_market is None:
@@ -500,36 +478,21 @@ def parse_swap_event(event_data, tx_info, drift_market_index: int):
         if out_amount is None:
             out_amount = getattr(event_data, "amount", 0)
 
-        # Based on the transaction flow you showed, this is actually a buyback where:
-        # - USDC goes out from insurance fund (recorded as out_amount)
-        # - DRIFT comes back to insurance fund (recorded as in_amount)
-        # The event records from insurance fund's perspective: losing USDC, gaining DRIFT
-
         if (
             drift_market_index != -1
             and in_market == drift_market_index
             and out_market == 0
         ):
-            # Based on the data pattern: in_amount = USDC spent, out_amount = DRIFT acquired
-            # Buyback: spending ~10 USDC to get ~24 DRIFT
-            usdc_amount = in_amount / 1e6  # ~10,000,000 = 10 USDC (6 decimals)
-            drift_amount = out_amount / 1e6  # ~24,000,000 = 24 DRIFT (6 decimals)
+            usdc_amount = in_amount / 1e6
+            drift_amount = out_amount / 1e6
 
         elif (
             drift_market_index != -1
             and in_market == 0
             and out_market == drift_market_index
         ):
-            # Insurance fund perspective: USDC coming in, DRIFT going out
-            # This means: DRIFT was sold for USDC (opposite of buyback)
-            usdc_received = in_amount / 1e6
-            drift_sold = out_amount / 1e6
-
-            # Skip selling transactions - this is opposite of buyback
-            return None  # Skip selling transactions
-
+            return None
         else:
-            # No matching market pair found
             return None
 
         if usdc_amount <= 0 or drift_amount <= 0:
@@ -543,7 +506,7 @@ def parse_swap_event(event_data, tx_info, drift_market_index: int):
             "usdc_amount": usdc_amount,
             "drift_amount": drift_amount,
             "price": usdc_amount / drift_amount if drift_amount > 0 else 0,
-            "raw_event": event_dict,  # For debugging
+            "raw_event": event_dict,
         }
 
     except Exception as e:
@@ -583,7 +546,8 @@ def create_transactions_dataframe(swap_events):
         df["timestamp"] = pd.to_datetime(df["timestamp"], unit="s")
         df["date"] = df["timestamp"].dt.date
         df = df.sort_values("timestamp", ascending=False)
-        # Remove raw_event column for display
+        df["solscan_link"] = df["tx_sig"].apply(lambda x: f"https://solscan.io/tx/{x}")
+
         if "raw_event" in df.columns:
             df = df.drop("raw_event", axis=1)
 
