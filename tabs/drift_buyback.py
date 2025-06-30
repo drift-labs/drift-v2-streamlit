@@ -26,9 +26,9 @@ def get_drift_market_index():
 async def drift_buyback_dashboard(ch: DriftClient):
     """Dashboard for tracking DRIFT smart acquisition/rebalancing program"""
 
-    st.title("🚀 $DRIFT Smart Acquisition Dashboard")
+    st.title("DRIFT Smart Acquisition Dashboard")
     st.markdown(
-        "**Real-time tracking of DRIFT buyback via insurance fund rebalancing**"
+        "**Real-time tracking of DRIFT smart acquisition via insurance fund rebalancing**"
     )
 
     with st.expander("⚙️ Configuration", expanded=False):

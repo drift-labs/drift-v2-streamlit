@@ -93,7 +93,7 @@ def main():
 
     tab_options = (
         "Welcome",
-        "DRIFT Buyback",
+        "DRIFT Smart Acquisition",
         "Overview-Markets",
         "Overview-Users",
         "Simulations",
@@ -222,7 +222,7 @@ def main():
         """
         )
 
-    elif tab.lower() == "drift buyback":
+    elif tab.lower() == "drift smart acquisition":
         loop = asyncio.new_event_loop()
         loop.run_until_complete(drift_buyback_dashboard(clearing_house))
 
