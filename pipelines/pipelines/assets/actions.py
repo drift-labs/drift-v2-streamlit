@@ -6,6 +6,7 @@ from dagster import asset
 import pandas as pd
 from ..partitions import daily_partitions
 
+
 @asset(
     group_name="actions",
     description="Clean and basic enrichment of action data",

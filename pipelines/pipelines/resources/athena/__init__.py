@@ -12,6 +12,7 @@ class AthenaConfig(ConfigurableResource):
     trades_table_name: str = "eventtype_traderecord"
     orders_table_name: str = "eventtype_orderrecord"
     actions_table_name: str = "eventtype_orderactionrecord"
+    dlob_snapshot_table_name: str = "eventtype_dlobsnapshot"
 
 
 class WrappedAthenaClient(AthenaClient):

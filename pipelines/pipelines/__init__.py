@@ -13,8 +13,8 @@ import os
 
 IO_MANAGERS = {
     "LOCAL": {
-        "io_manager": LocalCSVIOManager(base_dir="./local_data"),
-        "csv_io_manager": LocalCSVIOManager(base_dir="./local_data"),
+        "io_manager": LocalCSVIOManager(),
+        "csv_io_manager": LocalCSVIOManager(),
     },
     "PROD": {
         "io_manager": S3ParquetIOManager(
@@ -35,15 +35,6 @@ defs = Definitions(
     jobs=[daily_trades_job, daily_trigger_order_report_job],
     schedules=[daily_schedule],
     resources={
-        # "io_manager": S3ParquetIOManager(
-        #     s3_bucket=EnvVar("S3_OUTPUT_BUCKET"),
-        #     s3_prefix=EnvVar("S3_OUTPUT_PATH"),
-        # ),
-        # "io_manager": PandasParquetIOManager(base_dir="./local_data"),
-        # "csv_io_manager": S3CSVIOManager(
-        #     s3_bucket=EnvVar("S3_OUTPUT_BUCKET"),
-        #     s3_prefix=EnvVar("S3_OUTPUT_PATH"),
-        # ),
         **IO_MANAGERS[environment],
         "athena": WrappedAthenaClientResource(workgroup=EnvVar("ATHENA_WORKGROUP")),
         "athena_config": AthenaConfig(database_name=EnvVar("ATHENA_DB")),
