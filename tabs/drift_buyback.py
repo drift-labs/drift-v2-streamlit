@@ -168,7 +168,7 @@ async def drift_buyback_dashboard(ch: DriftClient):
         if recent_events:
             for event in recent_events:
                 with st.container():
-                    col1, col2, col3 = st.columns([2, 1, 1])
+                    col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
                     with col1:
                         st.text(
                             f"🕐 {datetime.datetime.fromtimestamp(event['timestamp']).strftime('%Y-%m-%d %H:%M:%S')}"
@@ -177,6 +177,8 @@ async def drift_buyback_dashboard(ch: DriftClient):
                         st.text(f"💰 ${event['usdc_amount']:,.2f} USDC")
                     with col3:
                         st.text(f"🎯 {event['drift_amount']:,.2f} DRIFT")
+                    with col4:
+                        st.text(f"💲 ${event['price']:.4f}")
                     st.divider()
 
     with transactions_tab:
@@ -363,60 +365,92 @@ async def fetch_insurance_fund_swap_events(
         parser = EventParser(ch.program.program_id, ch.program.coder)
         swap_events = []
 
-        for i, tx in enumerate(transactions):
-            if progress_bar and i % max(1, len(transactions) // 10) == 0:
-                progress = 5 + int((i / len(transactions)) * 40)
+        # Process transactions in parallel batches
+        semaphore = asyncio.Semaphore(50)  # Limit concurrent requests
+
+        async def process_transaction(tx, tx_index):
+            async with semaphore:
+                try:
+                    tx_sig = tx["signature"]
+                    full_tx = await ch.program.provider.connection.get_transaction(
+                        Signature.from_string(tx_sig),
+                        max_supported_transaction_version=0,
+                    )
+
+                    if not full_tx or not full_tx.value:
+                        return None, "failed_parse"
+
+                    logs = []
+                    local_event_types = []
+
+                    def event_callback(event):
+                        logs.append(event)
+                        if event.name not in local_event_types:
+                            local_event_types.append(event.name)
+
+                    tx_json = json.loads(full_tx.to_json())
+                    if (
+                        "result" in tx_json
+                        and tx_json["result"]
+                        and "meta" in tx_json["result"]
+                    ):
+                        log_messages = tx_json["result"]["meta"].get("logMessages", [])
+                        parser.parse_logs(log_messages, event_callback)
+
+                        tx_swap_events = []
+                        for event in logs:
+                            if event.name == "InsuranceFundSwapRecord":
+                                swap_data = parse_swap_event(
+                                    event.data, tx, drift_market_index
+                                )
+                                if swap_data:
+                                    tx_swap_events.append(swap_data)
+                            elif event.name in [
+                                "TransferProtocolIfSharesToRevenuePoolRecord",
+                                "InsuranceFundRecord",
+                            ]:
+                                pass
+
+                        return {
+                            "swap_events": tx_swap_events,
+                            "event_types": local_event_types,
+                            "status": "success",
+                        }, None
+                    else:
+                        return None, "failed_parse"
+
+                except Exception as e:
+                    return None, f"TX {tx_index}: {str(e)}"
+
+        batch_size = 50
+        for batch_start in range(0, len(transactions), batch_size):
+            batch = transactions[batch_start : batch_start + batch_size]
+
+            if progress_bar:
+                progress = 5 + int((batch_start / len(transactions)) * 40)
                 progress_bar.progress(
                     progress,
-                    text=f"Processing transaction {i + 1}/{len(transactions)}...",
-                )
-            try:
-                tx_sig = tx["signature"]
-                full_tx = await ch.program.provider.connection.get_transaction(
-                    Signature.from_string(tx_sig), max_supported_transaction_version=0
+                    text=f"Processing batch {batch_start // batch_size + 1}/{(len(transactions) + batch_size - 1) // batch_size}...",
                 )
 
-                if not full_tx or not full_tx.value:
+            tasks = [
+                process_transaction(tx, batch_start + i) for i, tx in enumerate(batch)
+            ]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            for result, error in results:
+                if error:
                     debug_info["failed_parses"] += 1
-                    continue
-
-                logs = []
-
-                def event_callback(event):
-                    logs.append(event)
-                    if event.name not in debug_info["all_event_types"]:
-                        debug_info["all_event_types"].append(event.name)
-
-                tx_json = json.loads(full_tx.to_json())
-                if (
-                    "result" in tx_json
-                    and tx_json["result"]
-                    and "meta" in tx_json["result"]
-                ):
-                    log_messages = tx_json["result"]["meta"].get("logMessages", [])
-                    parser.parse_logs(log_messages, event_callback)
+                    debug_info["errors"].append(error)
+                elif result and result["status"] == "success":
                     debug_info["successful_parses"] += 1
-
-                    for event in logs:
-                        if event.name == "InsuranceFundSwapRecord":
-                            swap_data = parse_swap_event(
-                                event.data, tx, drift_market_index
-                            )
-                            if swap_data:
-                                swap_events.append(swap_data)
-                                debug_info["swap_events_found"] += 1
-                        elif event.name in [
-                            "TransferProtocolIfSharesToRevenuePoolRecord",
-                            "InsuranceFundRecord",
-                        ]:
-                            pass
+                    swap_events.extend(result["swap_events"])
+                    debug_info["swap_events_found"] += len(result["swap_events"])
+                    for event_type in result["event_types"]:
+                        if event_type not in debug_info["all_event_types"]:
+                            debug_info["all_event_types"].append(event_type)
                 else:
                     debug_info["failed_parses"] += 1
-
-            except Exception as e:
-                debug_info["failed_parses"] += 1
-                debug_info["errors"].append(f"TX {i}: {str(e)}")
-                continue
 
         if progress_bar:
             progress_bar.progress(
