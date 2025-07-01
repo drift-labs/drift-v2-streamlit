@@ -35,7 +35,7 @@ def clean_trades(raw_trades: pd.DataFrame) -> pd.DataFrame:
     group_name="trades",
     description="Daily market index trade volume summary",
     partitions_def=daily_partitions,
-    io_manager_key="csv_io_manager",
+    # io_manager_key="csv_io_manager",
 )
 def daily_market_summary(clean_trades: pd.DataFrame) -> pd.DataFrame:
     """

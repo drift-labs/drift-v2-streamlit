@@ -2,10 +2,11 @@
 Order assets - Process and analyze order data
 """
 
-from dagster import asset
+from dagster import asset, AssetIn, TimeWindowPartitionMapping, BackfillPolicy
 import pandas as pd
 import re
 import numpy as np
+from typing import Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from ..resources import AthenaConfig, WrappedAthenaClientResource
 from ..partitions import daily_partitions
@@ -54,16 +55,14 @@ def check_missed_orders_for_market(
     market_index = market_orders["order_marketindex"].iloc[0]
     market_type = market_orders["order_markettype"].iloc[0]
 
-    # Fetch oracle prices for the market
     dlob = get_oracle_prices_for_market(
         context, athena, athena_config, market_index, market_type
     )
     dlob["oracle_price"] = pd.to_numeric(dlob["oracle"], errors="coerce")
     dlob["timestamp"] = pd.to_numeric(dlob["ts"], errors="coerce")
 
-    # Iterate over each unique order for the market
     for _, order_row in market_orders.iterrows():
-        order_ts = pd.to_numeric(order_row["ts_x"], errors="coerce")
+        order_ts = pd.to_numeric(order_row["ts"], errors="coerce")
         trigger_price = pd.to_numeric(order_row["order_triggerprice"], errors="coerce")
         trigger_condition = order_row["order_triggercondition"]
 
@@ -128,24 +127,82 @@ def clean_trigger_orders(
 
 @asset(
     group_name="orders",
-    description="Combine the trigger orders with their actions and categorize by status",
+    description="Calculates the daily state of all orders, carrying forward pending orders from the previous day.",
     partitions_def=daily_partitions,
+    backfill_policy=BackfillPolicy.single_run(),
+    ins={
+        "rolling_order_state": AssetIn(
+            "daily_order_state",
+            partition_mapping=TimeWindowPartitionMapping(
+                start_offset=-1, end_offset=-1
+            ),
+        ),
+    },
 )
-def trigger_orders_with_actions(
+def daily_order_state(
+    context,
     clean_trigger_orders: pd.DataFrame,
     clean_actions: pd.DataFrame,
+    rolling_order_state: Optional[pd.DataFrame],
 ) -> pd.DataFrame:
     """
-    Categorize all trigger orders as pending, canceled, or triggered
+    Categorize all trigger orders as pending, canceled, or triggered.
+    This is a stateful asset that depends on its own output from the previous day
+    to carry forward orders that were still pending.
     """
-    combined = clean_trigger_orders.merge(
-        clean_actions,
+    all_orders = clean_trigger_orders.copy()
+
+    if rolling_order_state is not None and not rolling_order_state.empty:
+        previous_pending_orders = rolling_order_state[
+            rolling_order_state["order_status"] == "pending"
+        ].copy()
+
+        if not previous_pending_orders.empty:
+            context.log.info(
+                f"Adding {len(previous_pending_orders)} pending orders from previous day"
+            )
+
+            order_columns = [
+                col
+                for col in clean_trigger_orders.columns
+                if col in previous_pending_orders.columns
+            ]
+
+            previous_orders_clean = previous_pending_orders[order_columns].copy()
+
+            previous_orders_clean["carried_forward"] = True
+            all_orders["carried_forward"] = False
+
+            all_orders = pd.concat(
+                [all_orders, previous_orders_clean], ignore_index=True
+            )
+
+            context.log.info(
+                f"Total orders for analysis: {len(all_orders)} (today: {len(clean_trigger_orders)}, carried forward: {len(previous_orders_clean)})"
+            )
+        else:
+            context.log.info("No pending orders from previous day to carry forward.")
+            all_orders["carried_forward"] = False
+    else:
+        context.log.info("No previous daily order state found. Starting fresh.")
+        all_orders["carried_forward"] = False
+
+    actions = clean_actions.copy()
+
+    actions["user"] = actions["taker"].fillna(actions["maker"])
+    actions["orderid"] = actions["takerorderid"].fillna(actions["makerorderid"])
+
+    combined = pd.merge(
+        all_orders,
+        actions,
         left_on=["user", "order_orderid"],
-        right_on=["taker", "takerorderid"],
+        right_on=["user", "orderid"],
         how="left",
+        suffixes=(None, "_action"),
     )
 
     group_keys = [combined["user"], combined["order_orderid"]]
+
     is_triggered_group = (
         (combined["action"] == "trigger").groupby(group_keys).transform("any")
     )
@@ -157,6 +214,7 @@ def trigger_orders_with_actions(
         is_triggered_group,
         is_canceled_group,
     ]
+
     choices = ["triggered", "canceled"]
     combined["order_status"] = np.select(conditions, choices, default="pending")
 
@@ -165,24 +223,20 @@ def trigger_orders_with_actions(
 
 @asset(
     group_name="orders",
-    description="Get pending trigger orders",
+    description="Filters the daily order state to get only pending orders.",
     partitions_def=daily_partitions,
 )
-def pending_trigger_orders(trigger_orders_with_actions: pd.DataFrame) -> pd.DataFrame:
-    return trigger_orders_with_actions[
-        trigger_orders_with_actions["order_status"] == "pending"
-    ]
+def pending_trigger_orders(daily_order_state: pd.DataFrame) -> pd.DataFrame:
+    return daily_order_state[daily_order_state["order_status"] == "pending"]
 
 
 @asset(
     group_name="orders",
-    description="Get canceled trigger orders",
+    description="Filters the daily order state to get only canceled orders.",
     partitions_def=daily_partitions,
 )
-def canceled_trigger_orders(trigger_orders_with_actions: pd.DataFrame) -> pd.DataFrame:
-    return trigger_orders_with_actions[
-        trigger_orders_with_actions["order_status"] == "canceled"
-    ]
+def canceled_trigger_orders(daily_order_state: pd.DataFrame) -> pd.DataFrame:
+    return daily_order_state[daily_order_state["order_status"] == "canceled"]
 
 
 @asset(
@@ -214,9 +268,9 @@ def missed_trigger_orders(
 
     # Get the cancellation timestamps from the 'cancel' action
     cancellations = untriggered_orders[untriggered_orders["action"] == "cancel"][
-        ["user", "order_orderid", "ts_y"]
+        ["user", "order_orderid", "ts_action"]
     ].copy()
-    cancellations.rename(columns={"ts_y": "cancellation_ts"}, inplace=True)
+    cancellations.rename(columns={"ts_action": "cancellation_ts"}, inplace=True)
     cancellations.drop_duplicates(subset=["user", "order_orderid"], inplace=True)
 
     # Merge cancellation time onto the base order data
@@ -252,13 +306,11 @@ def missed_trigger_orders(
 
 @asset(
     group_name="orders",
-    description="Get triggered trigger orders",
+    description="Filters the daily order state to get only triggered orders.",
     partitions_def=daily_partitions,
 )
-def triggered_trigger_orders(trigger_orders_with_actions: pd.DataFrame) -> pd.DataFrame:
-    return trigger_orders_with_actions[
-        trigger_orders_with_actions["order_status"] == "triggered"
-    ]
+def triggered_trigger_orders(daily_order_state: pd.DataFrame) -> pd.DataFrame:
+    return daily_order_state[daily_order_state["order_status"] == "triggered"]
 
 
 @asset(
@@ -274,15 +326,24 @@ def partially_filled_triggered_orders(
     """
     analysis_df = triggered_trigger_orders.copy()
 
+    # Consider both taker and maker fills to get the true total fill amount
+    trades = clean_trades.copy()
+    taker_fills = trades[["taker", "takerorderid", "baseassetamountfilled"]].rename(
+        columns={"taker": "user", "takerorderid": "orderid"}
+    )
+    maker_fills = trades[["maker", "makerorderid", "baseassetamountfilled"]].rename(
+        columns={"maker": "user", "makerorderid": "orderid"}
+    )
+
+    all_fills = pd.concat([taker_fills, maker_fills]).dropna(subset=["user", "orderid"])
+
     total_fills = (
-        clean_trades.groupby(["taker", "takerorderid"])["baseassetamountfilled"]
+        all_fills.groupby(["user", "orderid"])["baseassetamountfilled"]
         .sum()
         .reset_index()
     )
 
-    trade_lookup = total_fills.set_index(["taker", "takerorderid"])[
-        "baseassetamountfilled"
-    ]
+    trade_lookup = total_fills.set_index(["user", "orderid"])["baseassetamountfilled"]
 
     analysis_df_index = pd.MultiIndex.from_frame(analysis_df[["user", "order_orderid"]])
 
@@ -304,6 +365,7 @@ def partially_filled_triggered_orders(
     partitions_def=daily_partitions,
 )
 def triggered_order_summary(
+    daily_order_state: pd.DataFrame,
     clean_trigger_orders: pd.DataFrame,
     pending_trigger_orders: pd.DataFrame,
     canceled_trigger_orders: pd.DataFrame,
@@ -312,6 +374,9 @@ def triggered_order_summary(
     missed_trigger_orders: pd.DataFrame,
 ) -> pd.DataFrame:
     total_count = len(
+        daily_order_state.drop_duplicates(subset=["user", "order_orderid"])
+    )
+    new_order_count = len(
         clean_trigger_orders.drop_duplicates(subset=["user", "order_orderid"])
     )
     pending_count = len(
@@ -335,14 +400,32 @@ def triggered_order_summary(
         missed_trigger_orders.drop_duplicates(subset=["user", "order_orderid"])
     )
 
+    # Carried forward order analysis
+    if "carried_forward" in daily_order_state.columns:
+        carried_forward_orders = daily_order_state[
+            daily_order_state["carried_forward"]
+        ].drop_duplicates(subset=["user", "order_orderid"])
+        carried_forward_count = len(carried_forward_orders)
+
+        resolved_carried_forward_orders = carried_forward_orders[
+            carried_forward_orders["order_status"].isin(["triggered", "canceled"])
+        ]
+        resolved_carried_forward_count = len(resolved_carried_forward_orders)
+    else:
+        carried_forward_count = 0
+        resolved_carried_forward_count = 0
+
     summary_data = {
         "total_count": total_count,
+        "new_order_count": new_order_count,
         "pending_count": pending_count,
         "cancelled_count": cancel_count,
         "triggered_count": total_triggered_count,
         "triggered_filled_count": triggered_filled_count,
         "triggered_partially_filled_count": triggered_partial_count,
         "missed_trigger_count": missed_count,
+        "carried_forward_count": carried_forward_count,
+        "resolved_carried_forward_count": resolved_carried_forward_count,
     }
 
     return pd.DataFrame(summary_data, index=[0])

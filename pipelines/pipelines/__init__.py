@@ -8,7 +8,7 @@ from .resources import (
     LocalCSVIOManager
 )
 from .jobs import daily_trades_job, daily_trigger_order_report_job
-from .schedules import daily_schedule
+from .schedules import daily_schedule, daily_trigger_orders_schedule
 import os
 
 IO_MANAGERS = {
@@ -33,7 +33,7 @@ environment = os.getenv("DAGSTER_ENV", "LOCAL")
 defs = Definitions(
     assets=load_assets_from_modules([raw_data, trades, trigger_orders, actions]),
     jobs=[daily_trades_job, daily_trigger_order_report_job],
-    schedules=[daily_schedule],
+    schedules=[daily_schedule, daily_trigger_orders_schedule],
     resources={
         **IO_MANAGERS[environment],
         "athena": WrappedAthenaClientResource(workgroup=EnvVar("ATHENA_WORKGROUP")),
