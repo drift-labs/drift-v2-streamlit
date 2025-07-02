@@ -32,25 +32,6 @@ async def drift_buyback_dashboard(ch: DriftClient):
         "**Real-time tracking of DRIFT smart acquisition via insurance fund rebalancing**"
     )
 
-    with st.expander("⚙️ Configuration", expanded=False):
-        col1, col2, col3 = st.columns(3)
-
-        with col1:
-            program_id = str(ch.program_id)
-            st.text(f"Program ID: {program_id}")
-
-        with col2:
-            max_transactions = st.number_input(
-                "Max transactions to fetch",
-                min_value=5,
-                max_value=100,
-                value=5,
-                help="Higher values = more complete data but slower loading",
-            )
-
-        with col3:
-            auto_refresh = st.toggle("Auto-refresh (30s)", value=False)
-
     summary_tab, transactions_tab, analytics_tab, debug_tab = st.tabs(
         ["📊 Summary", "💱 Transactions", "📈 Analytics", "🔧 Debug"]
     )
@@ -91,10 +72,12 @@ async def drift_buyback_dashboard(ch: DriftClient):
             progress_bar.progress(3, text="Fetching transaction history...")
             swap_events, debug_info = await fetch_insurance_fund_swap_events(
                 ch,
-                max_transactions,
-                drift_market_index,
-                Pubkey.from_string("BuynBZjr5yiZCFpXngFQ31BAwechmFE1Ab6vNP3f5PTt"),
-                progress_bar,
+                max_transactions=3500,
+                drift_market_index=drift_market_index,
+                rebalance_config_pk=Pubkey.from_string(
+                    "BuynBZjr5yiZCFpXngFQ31BAwechmFE1Ab6vNP3f5PTt"
+                ),
+                progress_bar=progress_bar,
             )
 
             progress_bar.progress(100, text="Transaction loading complete!")
@@ -317,14 +300,10 @@ async def drift_buyback_dashboard(ch: DriftClient):
             st.subheader("Raw Swap Events")
             st.json(swap_events)
 
-    if auto_refresh:
-        await asyncio.sleep(30)
-        st.rerun()
-
 
 async def fetch_insurance_fund_swap_events(
     ch: DriftClient,
-    max_transactions: int = 1000,
+    max_transactions: int = 3500,
     drift_market_index: int = -1,
     rebalance_config_pk: Pubkey = None,
     progress_bar=None,
@@ -347,9 +326,9 @@ async def fetch_insurance_fund_swap_events(
         transactions = await transaction_history_for_account(
             ch.program.provider.connection,
             rebalance_config_pk,
-            None,  # before_sig
-            1000,  # limit per batch
-            max_transactions,  # max total
+            None,
+            1000,
+            max_transactions,
         )
 
         debug_info["total_transactions"] = len(transactions)
