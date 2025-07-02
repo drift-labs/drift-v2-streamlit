@@ -4,6 +4,7 @@ dagster-aws
 boto3
 pandas
 s3fs
+pyarrow
 
 [dev]
 dagster-webserver

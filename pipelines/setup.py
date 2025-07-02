@@ -10,7 +10,7 @@ setup(
         "boto3",
         "pandas",
         "s3fs",
-        "pyarrow"
+        "pyarrow",
     ],
     extras_require={"dev": ["dagster-webserver", "pytest"]},
 )
