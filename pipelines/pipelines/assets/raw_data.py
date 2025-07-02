@@ -4,9 +4,9 @@ Raw data assets - Extract data directly from Athena tables
 
 from dagster import asset
 from ..resources import AthenaConfig, WrappedAthenaClientResource
-from ..partitions import daily_partitions
 
-@asset(group_name="raw_data", partitions_def=daily_partitions)
+
+@asset(group_name="raw_data")
 def raw_trades(
     context, athena: WrappedAthenaClientResource, athena_config: AthenaConfig
 ):
@@ -20,7 +20,7 @@ def raw_trades(
     return athena.get_client().execute_query(query, fetch_results=True)
 
 
-@asset(group_name="raw_data", partitions_def=daily_partitions)
+@asset(group_name="raw_data")
 def raw_trigger_orders(
     context, athena: WrappedAthenaClientResource, athena_config: AthenaConfig
 ):
@@ -34,7 +34,7 @@ def raw_trigger_orders(
     return athena.get_client().execute_query(query, fetch_results=True)
 
 
-@asset(group_name="raw_data", partitions_def=daily_partitions)
+@asset(group_name="raw_data")
 def raw_actions(
     context, athena: WrappedAthenaClientResource, athena_config: AthenaConfig
 ):

@@ -9,7 +9,7 @@ import numpy as np
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from ..resources import AthenaConfig, WrappedAthenaClientResource
-from ..partitions import daily_partitions
+from ..partitions import dlob_start_daily_partitions
 from ..assets.dlob import get_oracle_prices_for_market
 
 
@@ -112,9 +112,9 @@ def check_missed_orders_for_market(
 
 
 @asset(
-    group_name="orders",
+    group_name="trigger_orders",
     description="Clean and basic enrichment of trigger order data",
-    partitions_def=daily_partitions,
+    partitions_def=dlob_start_daily_partitions,
 )
 def clean_trigger_orders(
     raw_trigger_orders: pd.DataFrame,
@@ -126,9 +126,9 @@ def clean_trigger_orders(
 
 
 @asset(
-    group_name="orders",
+    group_name="trigger_orders",
     description="Calculates the daily state of all orders, carrying forward pending orders from the previous day.",
-    partitions_def=daily_partitions,
+    partitions_def=dlob_start_daily_partitions,
     backfill_policy=BackfillPolicy.single_run(),
     ins={
         "rolling_order_state": AssetIn(
@@ -222,27 +222,27 @@ def daily_order_state(
 
 
 @asset(
-    group_name="orders",
+    group_name="trigger_orders",
     description="Filters the daily order state to get only pending orders.",
-    partitions_def=daily_partitions,
+    partitions_def=dlob_start_daily_partitions,
 )
 def pending_trigger_orders(daily_order_state: pd.DataFrame) -> pd.DataFrame:
     return daily_order_state[daily_order_state["order_status"] == "pending"]
 
 
 @asset(
-    group_name="orders",
+    group_name="trigger_orders",
     description="Filters the daily order state to get only canceled orders.",
-    partitions_def=daily_partitions,
+    partitions_def=dlob_start_daily_partitions,
 )
 def canceled_trigger_orders(daily_order_state: pd.DataFrame) -> pd.DataFrame:
     return daily_order_state[daily_order_state["order_status"] == "canceled"]
 
 
 @asset(
-    group_name="orders",
+    group_name="trigger_orders",
     description="Identifies pending or canceled orders that would have been triggered by oracle prices.",
-    partitions_def=daily_partitions,
+    partitions_def=dlob_start_daily_partitions,
 )
 def missed_trigger_orders(
     context,
@@ -305,18 +305,18 @@ def missed_trigger_orders(
 
 
 @asset(
-    group_name="orders",
+    group_name="trigger_orders",
     description="Filters the daily order state to get only triggered orders.",
-    partitions_def=daily_partitions,
+    partitions_def=dlob_start_daily_partitions,
 )
 def triggered_trigger_orders(daily_order_state: pd.DataFrame) -> pd.DataFrame:
     return daily_order_state[daily_order_state["order_status"] == "triggered"]
 
 
 @asset(
-    group_name="orders",
+    group_name="trigger_orders",
     description="Get a list of triggered orders that were partially filled.",
-    partitions_def=daily_partitions,
+    partitions_def=dlob_start_daily_partitions,
 )
 def partially_filled_triggered_orders(
     triggered_trigger_orders: pd.DataFrame, clean_trades: pd.DataFrame
@@ -360,9 +360,10 @@ def partially_filled_triggered_orders(
 
 
 @asset(
-    group_name="orders",
+    group_name="trigger_orders",
     description="Analyze the fill status of triggered orders and provide a summary.",
-    partitions_def=daily_partitions,
+    partitions_def=dlob_start_daily_partitions,
+    io_manager_key="csv_io_manager",
 )
 def triggered_order_summary(
     daily_order_state: pd.DataFrame,
