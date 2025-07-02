@@ -1,6 +1,7 @@
 import asyncio
 import datetime
 import json
+from datetime import timezone
 
 import pandas as pd
 import plotly.express as px
@@ -130,7 +131,7 @@ async def drift_buyback_dashboard(ch: DriftClient):
 
         with metrics_col2:
             st.metric(
-                label="USDC Sold",
+                label="USDC Invested",
                 value=f"${current_usdc_sold:,.2f}",
                 delta=f"{(current_usdc_sold / total_usdc_allocated * 100):.1f}% of total"
                 if total_usdc_allocated > 0
@@ -139,7 +140,7 @@ async def drift_buyback_dashboard(ch: DriftClient):
 
         with metrics_col3:
             st.metric(
-                label="DRIFT Bought",
+                label="DRIFT Acquired",
                 value=f"{current_drift_bought:,.2f}",
                 help="Total DRIFT tokens purchased through the program",
             )
@@ -171,7 +172,7 @@ async def drift_buyback_dashboard(ch: DriftClient):
                     col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
                     with col1:
                         st.text(
-                            f"🕐 {datetime.datetime.fromtimestamp(event['timestamp']).strftime('%Y-%m-%d %H:%M:%S')}"
+                            f"🕐 {datetime.datetime.fromtimestamp(event['timestamp'], tz=timezone.utc).astimezone().strftime('%Y-%m-%d %H:%M:%S')}"
                         )
                     with col2:
                         st.text(f"💰 ${event['usdc_amount']:,.2f} USDC")
@@ -577,7 +578,9 @@ def create_transactions_dataframe(swap_events):
     df = pd.DataFrame(swap_events)
 
     if not df.empty:
-        df["timestamp"] = pd.to_datetime(df["timestamp"], unit="s")
+        df["timestamp"] = pd.to_datetime(
+            df["timestamp"], unit="s", utc=True
+        ).dt.tz_convert(None)
         df["date"] = df["timestamp"].dt.date
         df = df.sort_values("timestamp", ascending=False)
         df["solscan_link"] = df["tx_sig"].apply(lambda x: f"https://solscan.io/tx/{x}")
