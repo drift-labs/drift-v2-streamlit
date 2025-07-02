@@ -7,8 +7,4 @@ s3fs
 pyarrow
 requests
 beautifulsoup4
-playwright
-
-[dev]
-dagster-webserver
-pytest
+playwright 

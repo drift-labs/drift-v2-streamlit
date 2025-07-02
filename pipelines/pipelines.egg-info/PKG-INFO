@@ -7,6 +7,10 @@ Requires-Dist: dagster-aws
 Requires-Dist: boto3
 Requires-Dist: pandas
 Requires-Dist: s3fs
+Requires-Dist: pyarrow
+Requires-Dist: requests
+Requires-Dist: beautifulsoup4
+Requires-Dist: playwright
 Provides-Extra: dev
 Requires-Dist: dagster-webserver; extra == "dev"
 Requires-Dist: pytest; extra == "dev"

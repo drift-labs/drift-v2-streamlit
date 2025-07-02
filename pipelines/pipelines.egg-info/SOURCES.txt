@@ -10,6 +10,7 @@ pipelines.egg-info/requires.txt
 pipelines.egg-info/top_level.txt
 pipelines/assets/__init__.py
 pipelines/assets/raw_data.py
+pipelines/assets/reports.py
 pipelines/assets/trades.py
 pipelines/jobs/__init__.py
 pipelines/partitions/__init__.py
