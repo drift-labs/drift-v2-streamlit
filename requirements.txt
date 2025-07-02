@@ -3,7 +3,7 @@ anchorpy==0.21.0
 base58==2.1.1
 boto3==1.38.30
 ccxt
-driftpy>=0.8.57
+driftpy>=0.8.61
 numpy==1.26.3
 openai
 pandas==2.2.3

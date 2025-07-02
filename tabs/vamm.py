@@ -1,8 +1,21 @@
 from typing import Tuple
 
-from driftpy.constants.numeric_constants import *
+import numpy as np
+import pandas as pd
+import streamlit as st
+from driftpy.constants.numeric_constants import (
+    BID_ASK_SPREAD_PRECISION,
+    DEFAULT_LARGE_BID_ASK_FACTOR,
+    FUNDING_RATE_BUFFER,
+    MAX_BID_ASK_INVENTORY_SKEW_FACTOR,
+    PRICE_PRECISION,
+    QUOTE_PRECISION,
+)
+from driftpy.drift_client import DriftClient
 from driftpy.math.amm import calculate_spread
 from driftpy.types import PerpMarketAccount
+
+pd.options.plotting.backend = "plotly"
 
 PERCENTAGE_PRECISION = 10**6
 DEFAULT_REVENUE_SINCE_LAST_FUNDING_SPREAD_RETREAT = 100
@@ -314,50 +327,6 @@ def calculate_spread_local(
     return int(long_spread), int(short_spread)
 
 
-import sys
-from datetime import datetime as dt
-from tokenize import tabsize
-
-import driftpy
-import numpy as np
-import pandas as pd
-import plotly.express as px
-from driftpy.accounts.oracle import *
-
-from constants import ALL_MARKET_NAMES
-
-pd.options.plotting.backend = "plotly"
-
-# from driftpy.constants.config import configs
-import asyncio
-import datetime
-import json
-import os
-import time
-from dataclasses import dataclass
-from enum import Enum
-
-import streamlit as st
-from anchorpy import EventParser, Provider, Wallet
-from driftpy.accounts import (
-    get_perp_market_account,
-    get_spot_market_account,
-    get_state_account,
-    get_user_account,
-)
-from driftpy.addresses import *
-from driftpy.constants.numeric_constants import *
-from driftpy.constants.perp_markets import PerpMarketConfig, devnet_perp_market_configs
-from driftpy.constants.spot_markets import SpotMarketConfig, devnet_spot_market_configs
-from driftpy.drift_client import DriftClient
-from driftpy.drift_user import DriftUser, get_token_amount
-from driftpy.math.margin import MarginCategory, calculate_asset_weight
-from driftpy.types import MarginRequirementType
-from solana.rpc.async_api import AsyncClient
-from solders.keypair import Keypair
-from solders.pubkey import Pubkey
-
-
 def calculate_market_open_bid_ask(
     base_asset_reserve, min_base_asset_reserve, max_base_asset_reserve, step_size=None
 ):
@@ -379,26 +348,6 @@ def calculate_market_open_bid_ask(
         open_bids = 0
 
     return open_bids, open_asks
-
-
-def calculate_inventory_liquidity_ratio(
-    base_asset_amount_with_amm,
-    base_asset_reserve,
-    min_base_asset_reserve,
-    max_base_asset_reserve,
-):
-    # inventory skew
-    open_bids, open_asks = calculate_market_open_bid_ask(
-        base_asset_reserve, min_base_asset_reserve, max_base_asset_reserve
-    )
-
-    min_side_liquidity = min(abs(open_bids), abs(open_asks))
-
-    inventory_scale_bn = min(
-        base_asset_amount_with_amm * PERCENTAGE_PRECISION // max(min_side_liquidity, 1),
-        PERCENTAGE_PRECISION,
-    )
-    return inventory_scale_bn
 
 
 def clamp(value, min_value, max_value):
@@ -519,6 +468,19 @@ async def vamm(ch: DriftClient):
                 market.amm.base_asset_amount_long, -market.amm.base_asset_amount_short
             )
             max_oi = market.amm.max_open_interest
+
+            try:
+                amm_spread_adjustment = market.amm.amm_spread_adjustment / 1e6 * 100
+            except AttributeError:
+                amm_spread_adjustment = 0
+
+            try:
+                amm_inventory_spread_adjustment = (
+                    market.amm.amm_inventory_spread_adjustment / 1e6 * 100
+                )
+            except AttributeError:
+                amm_inventory_spread_adjustment = 0
+
             res.append(
                 (
                     bytes(market.name).decode("utf-8"),
@@ -527,6 +489,8 @@ async def vamm(ch: DriftClient):
                     spread,
                     market.amm.base_spread / 1e6 * 100,
                     market.amm.max_spread / 1e6 * 100,
+                    amm_spread_adjustment,
+                    amm_inventory_spread_adjustment,
                     bids,
                     asks,
                     amm_owned,
@@ -566,6 +530,8 @@ async def vamm(ch: DriftClient):
                 "spread (%)",
                 "base spread (%)",
                 "max spread (%)",
+                "amm spread adj (%)",
+                "amm inv spread adj (%)",
                 "bids ($)",
                 "asks ($)",
                 "amm owned (%)",
@@ -625,7 +591,7 @@ async def vamm(ch: DriftClient):
         try:
             res = pd.read_csv(ff)
             st.plotly_chart(res["leverage"].plot(kind="box"))
-        except:
+        except Exception:
             st.warning("couldnt load file source")
 
     with tabs[3]:
@@ -695,6 +661,24 @@ async def vamm(ch: DriftClient):
             value=market.amm.max_spread / 1e6,
         )
 
+        current_amm_spread_adj = market.amm.amm_spread_adjustment / PERCENTAGE_PRECISION
+
+        try:
+            current_amm_inv_spread_adj = (
+                market.amm.amm_inventory_spread_adjustment / PERCENTAGE_PRECISION
+            )
+        except AttributeError:
+            current_amm_inv_spread_adj = 0.0
+
+        amm_spread_adjustment = c3.slider(
+            "AMM Spread Adjustment",
+            min_value=-0.01,
+            max_value=0.01,
+            value=current_amm_spread_adj,
+            step=0.0001,
+            format="%.4f",
+        )
+
         d1, d2, d3 = st.columns(3)
 
         last_oracle_reserve_price_spread_pct = d1.slider(
@@ -703,6 +687,15 @@ async def vamm(ch: DriftClient):
         )
         last_oracle_conf_pct = d2.slider(
             "Last Oracle Conf %", value=market.amm.last_oracle_conf_pct / 1e6
+        )
+
+        amm_inventory_spread_adjustment = d3.slider(
+            "AMM Inventory Spread Adjustment",
+            min_value=-0.01,
+            max_value=0.01,
+            value=current_amm_inv_spread_adj,
+            step=0.0001,
+            format="%.4f",
         )
 
         with st.expander("amm"):
@@ -792,4 +785,21 @@ async def vamm(ch: DriftClient):
 
         op = ch.get_oracle_price_data_for_perp_market(0)
         result2 = calculate_spread(market.amm, oracle_price_data=op)
+
         st.write("Result2:", result2)
+
+        st.write("---")
+        st.write("**AMM Spread Adjustment Parameters:**")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric(
+                "AMM Spread Adjustment",
+                f"{amm_spread_adjustment:.4f}",
+                f"{amm_spread_adjustment * 100:.2f}%",
+            )
+        with col2:
+            st.metric(
+                "AMM Inventory Spread Adjustment",
+                f"{amm_inventory_spread_adjustment:.4f}",
+                f"{amm_inventory_spread_adjustment * 100:.2f}%",
+            )
