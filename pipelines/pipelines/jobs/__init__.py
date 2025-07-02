@@ -7,7 +7,6 @@ daily_trades_job = define_asset_job(
     selection=AssetSelection.keys("raw_trades") | AssetSelection.groups("trades"),
 )
 
-
 daily_trigger_order_report_job = define_asset_job(
     name="daily_trigger_order_report",
     partitions_def=dlob_start_daily_partitions,
