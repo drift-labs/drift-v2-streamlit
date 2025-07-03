@@ -469,17 +469,8 @@ async def vamm(ch: DriftClient):
             )
             max_oi = market.amm.max_open_interest
 
-            try:
-                amm_spread_adjustment = market.amm.amm_spread_adjustment / 1e6 * 100
-            except AttributeError:
-                amm_spread_adjustment = 0
-
-            try:
-                amm_inventory_spread_adjustment = (
-                    market.amm.amm_inventory_spread_adjustment / 1e6 * 100
-                )
-            except AttributeError:
-                amm_inventory_spread_adjustment = 0
+            amm_spread_adjustment = market.amm.amm_spread_adjustment
+            amm_inventory_spread_adjustment = market.amm.amm_inventory_spread_adjustment
 
             res.append(
                 (
@@ -510,6 +501,7 @@ async def vamm(ch: DriftClient):
                     "tfmd": market.amm.total_fee_minus_distributions / QUOTE_PRECISION,
                     "liq_fee": market.amm.total_liquidation_fee / QUOTE_PRECISION,
                     "withdrawn_fee": market.amm.total_fee_withdrawn / QUOTE_PRECISION,
+                    "total_social_loss": market.amm.total_social_loss / QUOTE_PRECISION,
                     "revenue_per_period": market.insurance_claim.revenue_withdraw_since_last_settle
                     / QUOTE_PRECISION,
                     "max_revenue_withdraw_per_period": market.insurance_claim.max_revenue_withdraw_per_period
@@ -517,6 +509,11 @@ async def vamm(ch: DriftClient):
                     "quote_settled_insurance": market.insurance_claim.quote_settled_insurance
                     / QUOTE_PRECISION,
                     "quote_max_insurance": market.insurance_claim.quote_max_insurance
+                    / QUOTE_PRECISION,
+                    "remaining_insurance": (
+                        market.insurance_claim.quote_max_insurance
+                        - market.insurance_claim.quote_settled_insurance
+                    )
                     / QUOTE_PRECISION,
                 }
             )
@@ -530,8 +527,8 @@ async def vamm(ch: DriftClient):
                 "spread (%)",
                 "base spread (%)",
                 "max spread (%)",
-                "amm spread adj (%)",
-                "amm inv spread adj (%)",
+                "amm spread adj",
+                "amm inv spread adj",
                 "bids ($)",
                 "asks ($)",
                 "amm owned (%)",
@@ -661,22 +658,15 @@ async def vamm(ch: DriftClient):
             value=market.amm.max_spread / 1e6,
         )
 
-        current_amm_spread_adj = market.amm.amm_spread_adjustment / PERCENTAGE_PRECISION
-
-        try:
-            current_amm_inv_spread_adj = (
-                market.amm.amm_inventory_spread_adjustment / PERCENTAGE_PRECISION
-            )
-        except AttributeError:
-            current_amm_inv_spread_adj = 0.0
+        current_amm_spread_adj = market.amm.amm_spread_adjustment
+        current_amm_inv_spread_adj = market.amm.amm_inventory_spread_adjustment
 
         amm_spread_adjustment = c3.slider(
             "AMM Spread Adjustment",
-            min_value=-0.01,
-            max_value=0.01,
+            min_value=-10000,
+            max_value=10000,
             value=current_amm_spread_adj,
-            step=0.0001,
-            format="%.4f",
+            step=1,
         )
 
         d1, d2, d3 = st.columns(3)
@@ -691,11 +681,10 @@ async def vamm(ch: DriftClient):
 
         amm_inventory_spread_adjustment = d3.slider(
             "AMM Inventory Spread Adjustment",
-            min_value=-0.01,
-            max_value=0.01,
+            min_value=-200,
+            max_value=200,
             value=current_amm_inv_spread_adj,
-            step=0.0001,
-            format="%.4f",
+            step=1,
         )
 
         with st.expander("amm"):
